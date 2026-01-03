@@ -10,7 +10,6 @@ type User struct {
 	ID            int64
 	Email         string
 	Username      string
-	Wechat        string
 	Notes         string
 	PasswordHash  string
 	Role          string
@@ -18,6 +17,7 @@ type User struct {
 	Concurrency   int
 	Status        string
 	AllowedGroups []int64
+	TokenVersion  int64 // Incremented on password change to invalidate existing tokens
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 

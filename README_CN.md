@@ -20,6 +20,8 @@
 
 体验地址：**https://v2.pincc.ai/**
 
+演示账号（共享演示环境；自建部署不会自动创建该账号）：
+
 | 邮箱 | 密码 |
 |------|------|
 | admin@sub2api.com | admin123 |
@@ -260,8 +262,10 @@ jwt:
   expire_hour: 24
 
 default:
-  admin_email: "admin@example.com"
-  admin_password: "admin123"
+  user_concurrency: 5
+  user_balance: 0
+  api_key_prefix: "sk-"
+  rate_multiplier: 1.0
 ```
 
 ```bash
@@ -279,6 +283,16 @@ go run ./cmd/server
 # 前端（支持热重载）
 cd frontend
 npm run dev
+```
+
+#### 代码生成
+
+修改 `backend/ent/schema` 后，需要重新生成 Ent + Wire：
+
+```bash
+cd backend
+go generate ./ent
+go generate ./cmd/server
 ```
 
 ---
@@ -317,6 +331,10 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 
 > **⚠️ 注意**：Anthropic Claude 和 Antigravity Claude **不能在同一上下文中混合使用**，请通过分组功能做好隔离。
 
+
+### 已知问题
+在 Claude Code 中，无法自动退出Plan Mode。（正常使用原生Claude Api时，Plan 完成后，Claude Code会弹出弹出选项让用户同意或拒绝Plan。） 
+解决办法：shift + Tab，手动退出Plan mode，然后输入内容 告诉 Claude Code 同意或拒绝 Plan
 ---
 
 ## 项目结构

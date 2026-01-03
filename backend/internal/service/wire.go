@@ -54,22 +54,19 @@ func ProvideTimingWheelService() *TimingWheelService {
 	return svc
 }
 
-// ProvideAntigravityQuotaRefresher creates and starts AntigravityQuotaRefresher
-func ProvideAntigravityQuotaRefresher(
-	accountRepo AccountRepository,
-	proxyRepo ProxyRepository,
-	oauthSvc *AntigravityOAuthService,
-	cfg *config.Config,
-) *AntigravityQuotaRefresher {
-	svc := NewAntigravityQuotaRefresher(accountRepo, proxyRepo, oauthSvc, cfg)
-	svc.Start()
-	return svc
-}
-
 // ProvideDeferredService creates and starts DeferredService
 func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService) *DeferredService {
 	svc := NewDeferredService(accountRepo, timingWheel, 10*time.Second)
 	svc.Start()
+	return svc
+}
+
+// ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+	svc := NewConcurrencyService(cache)
+	if cfg != nil {
+		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
+	}
 	return svc
 }
 
@@ -94,6 +91,7 @@ var ProviderSet = wire.NewSet(
 	NewOAuthService,
 	NewOpenAIOAuthService,
 	NewGeminiOAuthService,
+	NewGeminiQuotaService,
 	NewAntigravityOAuthService,
 	NewGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
@@ -107,12 +105,14 @@ var ProviderSet = wire.NewSet(
 	ProvideEmailQueueService,
 	NewTurnstileService,
 	NewSubscriptionService,
-	NewConcurrencyService,
+	ProvideConcurrencyService,
 	NewIdentityService,
 	NewCRSSyncService,
 	ProvideUpdateService,
 	ProvideTokenRefreshService,
 	ProvideTimingWheelService,
 	ProvideDeferredService,
-	ProvideAntigravityQuotaRefresher,
+	NewAntigravityQuotaFetcher,
+	NewUserAttributeService,
+	NewUsageCache,
 )

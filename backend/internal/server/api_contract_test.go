@@ -51,7 +51,6 @@ func TestAPIContracts(t *testing.T) {
 					"id": 1,
 					"email": "alice@example.com",
 					"username": "alice",
-					"wechat": "wx_alice",
 					"notes": "hello",
 					"role": "user",
 					"balance": 12.5,
@@ -348,7 +347,6 @@ func newContractDeps(t *testing.T) *contractDeps {
 				ID:            1,
 				Email:         "alice@example.com",
 				Username:      "alice",
-				Wechat:        "wx_alice",
 				Notes:         "hello",
 				Role:          service.RoleUser,
 				Balance:       12.5,
@@ -385,7 +383,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	authHandler := handler.NewAuthHandler(cfg, nil, userService)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService)
-	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil)
+	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil)
 
 	jwtAuth := func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
@@ -503,7 +501,7 @@ func (r *stubUserRepo) List(ctx context.Context, params pagination.PaginationPar
 	return nil, nil, errors.New("not implemented")
 }
 
-func (r *stubUserRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, status, role, search string) ([]service.User, *pagination.PaginationResult, error) {
+func (r *stubUserRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters service.UserListFilters) ([]service.User, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -715,6 +713,14 @@ func (r *stubApiKeyRepo) GetByID(ctx context.Context, id int64) (*service.ApiKey
 	}
 	clone := *key
 	return &clone, nil
+}
+
+func (r *stubApiKeyRepo) GetOwnerID(ctx context.Context, id int64) (int64, error) {
+	key, ok := r.byID[id]
+	if !ok {
+		return 0, service.ErrApiKeyNotFound
+	}
+	return key.UserID, nil
 }
 
 func (r *stubApiKeyRepo) GetByKey(ctx context.Context, key string) (*service.ApiKey, error) {
@@ -970,6 +976,18 @@ func (r *stubUsageLogRepo) GetUserStatsAggregated(ctx context.Context, userID in
 }
 
 func (r *stubUsageLogRepo) GetApiKeyStatsAggregated(ctx context.Context, apiKeyID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetAccountStatsAggregated(ctx context.Context, accountID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetModelStatsAggregated(ctx context.Context, modelName string, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetDailyStatsAggregated(ctx context.Context, userID int64, startTime, endTime time.Time) ([]map[string]any, error) {
 	return nil, errors.New("not implemented")
 }
 

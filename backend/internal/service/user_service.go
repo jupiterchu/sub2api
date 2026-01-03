@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/infrastructure/errors"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -13,6 +13,14 @@ var (
 	ErrPasswordIncorrect = infraerrors.BadRequest("PASSWORD_INCORRECT", "current password is incorrect")
 	ErrInsufficientPerms = infraerrors.Forbidden("INSUFFICIENT_PERMISSIONS", "insufficient permissions")
 )
+
+// UserListFilters contains all filter options for listing users
+type UserListFilters struct {
+	Status     string           // User status filter
+	Role       string           // User role filter
+	Search     string           // Search in email, username
+	Attributes map[int64]string // Custom attribute filters: attributeID -> value
+}
 
 type UserRepository interface {
 	Create(ctx context.Context, user *User) error
@@ -23,7 +31,7 @@ type UserRepository interface {
 	Delete(ctx context.Context, id int64) error
 
 	List(ctx context.Context, params pagination.PaginationParams) ([]User, *pagination.PaginationResult, error)
-	ListWithFilters(ctx context.Context, params pagination.PaginationParams, status, role, search string) ([]User, *pagination.PaginationResult, error)
+	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error)
 
 	UpdateBalance(ctx context.Context, id int64, amount float64) error
 	DeductBalance(ctx context.Context, id int64, amount float64) error
@@ -36,7 +44,6 @@ type UserRepository interface {
 type UpdateProfileRequest struct {
 	Email       *string `json:"email"`
 	Username    *string `json:"username"`
-	Wechat      *string `json:"wechat"`
 	Concurrency *int    `json:"concurrency"`
 }
 
@@ -100,10 +107,6 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 		user.Username = *req.Username
 	}
 
-	if req.Wechat != nil {
-		user.Wechat = *req.Wechat
-	}
-
 	if req.Concurrency != nil {
 		user.Concurrency = *req.Concurrency
 	}
@@ -116,6 +119,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 }
 
 // ChangePassword 修改密码
+// Security: Increments TokenVersion to invalidate all existing JWT tokens
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, req ChangePasswordRequest) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -130,6 +134,10 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, req Chan
 	if err := user.SetPassword(req.NewPassword); err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}
+
+	// Increment TokenVersion to invalidate all existing tokens
+	// This ensures that any tokens issued before the password change become invalid
+	user.TokenVersion++
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("update user: %w", err)

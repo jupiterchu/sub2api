@@ -202,16 +202,19 @@
                 </div>
               </div>
 
-              <!-- No Limits -->
+              <!-- No Limits - Unlimited badge -->
               <div
                 v-if="
                   !row.group?.daily_limit_usd &&
                   !row.group?.weekly_limit_usd &&
                   !row.group?.monthly_limit_usd
                 "
-                class="text-xs text-gray-500"
+                class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 px-3 py-2 dark:from-emerald-900/20 dark:to-teal-900/20"
               >
-                {{ t('admin.subscriptions.noLimits') }}
+                <span class="text-lg text-emerald-600 dark:text-emerald-400">∞</span>
+                <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                  {{ t('admin.subscriptions.unlimited') }}
+                </span>
               </div>
             </div>
           </template>
@@ -335,12 +338,59 @@
       >
         <div>
           <label class="input-label">{{ t('admin.subscriptions.form.user') }}</label>
-          <Select
-            v-model="assignForm.user_id"
-            :options="userOptions"
-            :placeholder="t('admin.subscriptions.selectUser')"
-            searchable
-          />
+          <div class="relative">
+            <input
+              v-model="userSearchKeyword"
+              type="text"
+              class="input pr-8"
+              :placeholder="t('admin.usage.searchUserPlaceholder')"
+              @input="debounceSearchUsers"
+              @focus="showUserDropdown = true"
+            />
+            <button
+              v-if="selectedUser"
+              @click="clearUserSelection"
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+            <!-- User Dropdown -->
+            <div
+              v-if="showUserDropdown && (userSearchResults.length > 0 || userSearchKeyword)"
+              class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+            >
+              <div
+                v-if="userSearchLoading"
+                class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"
+              >
+                {{ t('common.loading') }}
+              </div>
+              <div
+                v-else-if="userSearchResults.length === 0 && userSearchKeyword"
+                class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"
+              >
+                {{ t('common.noOptionsFound') }}
+              </div>
+              <button
+                v-for="user in userSearchResults"
+                :key="user.id"
+                type="button"
+                @click="selectUser(user)"
+                class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span>
+                <span class="ml-2 text-gray-500 dark:text-gray-400">#{{ user.id }}</span>
+              </button>
+            </div>
+          </div>
         </div>
         <div>
           <label class="input-label">{{ t('admin.subscriptions.form.group') }}</label>
@@ -462,11 +512,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { UserSubscription, Group, User } from '@/types'
+import type { UserSubscription, Group } from '@/types'
+import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatDateOnly } from '@/utils/format'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -501,9 +552,17 @@ const statusOptions = computed(() => [
 
 const subscriptions = ref<UserSubscription[]>([])
 const groups = ref<Group[]>([])
-const users = ref<User[]>([])
 const loading = ref(false)
 let abortController: AbortController | null = null
+
+// User search state
+const userSearchKeyword = ref('')
+const userSearchResults = ref<SimpleUser[]>([])
+const userSearchLoading = ref(false)
+const showUserDropdown = ref(false)
+const selectedUser = ref<SimpleUser | null>(null)
+let userSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
 const filters = reactive({
   status: '',
   group_id: ''
@@ -544,9 +603,6 @@ const subscriptionGroupOptions = computed(() =>
     .filter((g) => g.subscription_type === 'subscription' && g.status === 'active')
     .map((g) => ({ value: g.id, label: g.name }))
 )
-
-// User options for assign
-const userOptions = computed(() => users.value.map((u) => ({ value: u.id, label: u.email })))
 
 const loadSubscriptions = async () => {
   if (abortController) {
@@ -590,13 +646,51 @@ const loadGroups = async () => {
   }
 }
 
-const loadUsers = async () => {
-  try {
-    const response = await adminAPI.users.list(1, 1000)
-    users.value = response.items
-  } catch (error) {
-    console.error('Error loading users:', error)
+// User search with debounce
+const debounceSearchUsers = () => {
+  if (userSearchTimeout) {
+    clearTimeout(userSearchTimeout)
   }
+  userSearchTimeout = setTimeout(searchUsers, 300)
+}
+
+const searchUsers = async () => {
+  const keyword = userSearchKeyword.value.trim()
+
+  // Clear selection if user modified the search keyword
+  if (selectedUser.value && keyword !== selectedUser.value.email) {
+    selectedUser.value = null
+    assignForm.user_id = null
+  }
+
+  if (!keyword) {
+    userSearchResults.value = []
+    return
+  }
+
+  userSearchLoading.value = true
+  try {
+    userSearchResults.value = await adminAPI.usage.searchUsers(keyword)
+  } catch (error) {
+    console.error('Failed to search users:', error)
+    userSearchResults.value = []
+  } finally {
+    userSearchLoading.value = false
+  }
+}
+
+const selectUser = (user: SimpleUser) => {
+  selectedUser.value = user
+  userSearchKeyword.value = user.email
+  showUserDropdown.value = false
+  assignForm.user_id = user.id
+}
+
+const clearUserSelection = () => {
+  selectedUser.value = null
+  userSearchKeyword.value = ''
+  userSearchResults.value = []
+  assignForm.user_id = null
 }
 
 const handlePageChange = (page: number) => {
@@ -615,6 +709,11 @@ const closeAssignModal = () => {
   assignForm.user_id = null
   assignForm.group_id = null
   assignForm.validity_days = 30
+  // Clear user search state
+  selectedUser.value = null
+  userSearchKeyword.value = ''
+  userSearchResults.value = []
+  showUserDropdown.value = false
 }
 
 const handleAssignSubscription = async () => {
@@ -754,10 +853,25 @@ const formatResetTime = (windowStart: string, period: 'daily' | 'weekly' | 'mont
   }
 }
 
+// Handle click outside to close user dropdown
+const handleClickOutside = (event: MouseEvent) => {
+  const target = event.target as HTMLElement
+  if (!target.closest('.relative')) {
+    showUserDropdown.value = false
+  }
+}
+
 onMounted(() => {
   loadSubscriptions()
   loadGroups()
-  loadUsers()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+  if (userSearchTimeout) {
+    clearTimeout(userSearchTimeout)
+  }
 })
 </script>
 

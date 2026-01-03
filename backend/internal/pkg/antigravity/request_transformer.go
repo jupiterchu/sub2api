@@ -3,6 +3,7 @@ package antigravity
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -147,8 +148,9 @@ func buildContents(messages []ClaudeMessage, toolIDToName map[string]string, isT
 			if !hasThoughtPart && len(parts) > 0 {
 				// 在开头添加 dummy thinking block
 				parts = append([]GeminiPart{{
-					Text:    "Thinking...",
-					Thought: true,
+					Text:             "Thinking...",
+					Thought:          true,
+					ThoughtSignature: dummyThoughtSignature,
 				}}, parts...)
 			}
 		}
@@ -205,6 +207,13 @@ func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu
 			// 保留原有 signature（Claude 模型需要有效的 signature）
 			if block.Signature != "" {
 				part.ThoughtSignature = block.Signature
+			} else if !allowDummyThought {
+				// Claude 模型需要有效 signature，跳过无 signature 的 thinking block
+				log.Printf("Warning: skipping thinking block without signature for Claude model")
+				continue
+			} else {
+				// Gemini 模型使用 dummy signature
+				part.ThoughtSignature = dummyThoughtSignature
 			}
 			parts = append(parts, part)
 
@@ -231,10 +240,9 @@ func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu
 					ID:   block.ID,
 				},
 			}
-			// 保留原有 signature，或对 Gemini 模型使用 dummy signature
-			if block.Signature != "" {
-				part.ThoughtSignature = block.Signature
-			} else if allowDummyThought {
+			// 只有 Gemini 模型使用 dummy signature
+			// Claude 模型不设置 signature（避免验证问题）
+			if allowDummyThought {
 				part.ThoughtSignature = dummyThoughtSignature
 			}
 			parts = append(parts, part)
@@ -379,12 +387,43 @@ func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
 	// 普通工具
 	var funcDecls []GeminiFunctionDecl
 	for _, tool := range tools {
+		// 跳过无效工具名称
+		if strings.TrimSpace(tool.Name) == "" {
+			log.Printf("Warning: skipping tool with empty name")
+			continue
+		}
+
+		var description string
+		var inputSchema map[string]any
+
+		// 检查是否为 custom 类型工具 (MCP)
+		if tool.Type == "custom" {
+			if tool.Custom == nil || tool.Custom.InputSchema == nil {
+				log.Printf("[Warning] Skipping invalid custom tool '%s': missing custom spec or input_schema", tool.Name)
+				continue
+			}
+			description = tool.Custom.Description
+			inputSchema = tool.Custom.InputSchema
+
+		} else {
+			// 标准格式: 从顶层字段获取
+			description = tool.Description
+			inputSchema = tool.InputSchema
+		}
+
 		// 清理 JSON Schema
-		params := cleanJSONSchema(tool.InputSchema)
+		params := cleanJSONSchema(inputSchema)
+		// 为 nil schema 提供默认值
+		if params == nil {
+			params = map[string]any{
+				"type":       "OBJECT",
+				"properties": map[string]any{},
+			}
+		}
 
 		funcDecls = append(funcDecls, GeminiFunctionDecl{
 			Name:        tool.Name,
-			Description: tool.Description,
+			Description: description,
 			Parameters:  params,
 		})
 	}
@@ -443,31 +482,64 @@ func cleanJSONSchema(schema map[string]any) map[string]any {
 }
 
 // excludedSchemaKeys 不支持的 schema 字段
+// 基于 Claude API (Vertex AI) 的实际支持情况
+// 支持: type, description, enum, properties, required, additionalProperties, items
+// 不支持: minItems, maxItems, minLength, maxLength, pattern, minimum, maximum 等验证字段
 var excludedSchemaKeys = map[string]bool{
-	"$schema":              true,
-	"$id":                  true,
-	"$ref":                 true,
-	"additionalProperties": true,
-	"minLength":            true,
-	"maxLength":            true,
-	"minItems":             true,
-	"maxItems":             true,
-	"uniqueItems":          true,
-	"minimum":              true,
-	"maximum":              true,
-	"exclusiveMinimum":     true,
-	"exclusiveMaximum":     true,
-	"pattern":              true,
-	"format":               true,
-	"default":              true,
-	"strict":               true,
-	"const":                true,
-	"examples":             true,
-	"deprecated":           true,
-	"readOnly":             true,
-	"writeOnly":            true,
-	"contentMediaType":     true,
-	"contentEncoding":      true,
+	// 元 schema 字段
+	"$schema": true,
+	"$id":     true,
+	"$ref":    true,
+
+	// 字符串验证（Gemini 不支持）
+	"minLength": true,
+	"maxLength": true,
+	"pattern":   true,
+
+	// 数字验证（Claude API 通过 Vertex AI 不支持这些字段）
+	"minimum":          true,
+	"maximum":          true,
+	"exclusiveMinimum": true,
+	"exclusiveMaximum": true,
+	"multipleOf":       true,
+
+	// 数组验证（Claude API 通过 Vertex AI 不支持这些字段）
+	"uniqueItems": true,
+	"minItems":    true,
+	"maxItems":    true,
+
+	// 组合 schema（Gemini 不支持）
+	"oneOf":       true,
+	"anyOf":       true,
+	"allOf":       true,
+	"not":         true,
+	"if":          true,
+	"then":        true,
+	"else":        true,
+	"$defs":       true,
+	"definitions": true,
+
+	// 对象验证（仅保留 properties/required/additionalProperties）
+	"minProperties":     true,
+	"maxProperties":     true,
+	"patternProperties": true,
+	"propertyNames":     true,
+	"dependencies":      true,
+	"dependentSchemas":  true,
+	"dependentRequired": true,
+
+	// 其他不支持的字段
+	"default":          true,
+	"const":            true,
+	"examples":         true,
+	"deprecated":       true,
+	"readOnly":         true,
+	"writeOnly":        true,
+	"contentMediaType": true,
+	"contentEncoding":  true,
+
+	// Claude 特有字段
+	"strict": true,
 }
 
 // cleanSchemaValue 递归清理 schema 值
@@ -484,6 +556,29 @@ func cleanSchemaValue(value any) any {
 			// 特殊处理 type 字段
 			if k == "type" {
 				result[k] = cleanTypeValue(val)
+				continue
+			}
+
+			// 特殊处理 format 字段：只保留 Gemini 支持的 format 值
+			if k == "format" {
+				if formatStr, ok := val.(string); ok {
+					// Gemini 只支持 date-time, date, time
+					if formatStr == "date-time" || formatStr == "date" || formatStr == "time" {
+						result[k] = val
+					}
+					// 其他 format 值直接跳过
+				}
+				continue
+			}
+
+			// 特殊处理 additionalProperties：Claude API 只支持布尔值，不支持 schema 对象
+			if k == "additionalProperties" {
+				if boolVal, ok := val.(bool); ok {
+					result[k] = boolVal
+				} else {
+					// 如果是 schema 对象，转换为 false（更安全的默认值）
+					result[k] = false
+				}
 				continue
 			}
 

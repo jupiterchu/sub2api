@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/infrastructure"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -19,7 +19,6 @@ import (
 
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 type Application struct {
@@ -31,7 +30,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	wire.Build(
 		// Infrastructure layer ProviderSets
 		config.ProviderSet,
-		infrastructure.ProviderSet,
 
 		// Business layer ProviderSets
 		repository.ProviderSet,
@@ -62,16 +60,16 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 }
 
 func provideCleanup(
-	db *gorm.DB,
+	entClient *ent.Client,
 	rdb *redis.Client,
 	tokenRefresh *service.TokenRefreshService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
+	billingCache *service.BillingCacheService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
 	geminiOAuth *service.GeminiOAuthService,
 	antigravityOAuth *service.AntigravityOAuthService,
-	antigravityQuota *service.AntigravityQuotaRefresher,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -94,6 +92,10 @@ func provideCleanup(
 				emailQueue.Stop()
 				return nil
 			}},
+			{"BillingCacheService", func() error {
+				billingCache.Stop()
+				return nil
+			}},
 			{"OAuthService", func() error {
 				oauth.Stop()
 				return nil
@@ -110,19 +112,11 @@ func provideCleanup(
 				antigravityOAuth.Stop()
 				return nil
 			}},
-			{"AntigravityQuotaRefresher", func() error {
-				antigravityQuota.Stop()
-				return nil
-			}},
 			{"Redis", func() error {
 				return rdb.Close()
 			}},
-			{"Database", func() error {
-				sqlDB, err := db.DB()
-				if err != nil {
-					return err
-				}
-				return sqlDB.Close()
+			{"Ent", func() error {
+				return entClient.Close()
 			}},
 		}
 

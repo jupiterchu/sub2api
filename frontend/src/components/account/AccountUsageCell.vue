@@ -93,10 +93,10 @@
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
 
-    <!-- Antigravity OAuth accounts: show quota from extra field -->
+    <!-- Antigravity OAuth accounts: fetch usage from API -->
     <template v-else-if="account.platform === 'antigravity' && account.type === 'oauth'">
       <!-- 账户类型徽章 -->
-      <div v-if="antigravityTierLabel" class="mb-1">
+      <div v-if="antigravityTierLabel" class="mb-1 flex items-center gap-1">
         <span
           :class="[
             'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium',
@@ -105,46 +105,165 @@
         >
           {{ antigravityTierLabel }}
         </span>
+        <!-- 不合格账户警告图标 -->
+        <span
+          v-if="hasIneligibleTiers"
+          class="group relative cursor-help"
+        >
+          <svg
+            class="h-3.5 w-3.5 text-red-500"
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+              clip-rule="evenodd"
+            />
+          </svg>
+          <span
+            class="pointer-events-none absolute left-0 top-full z-50 mt-1 w-80 whitespace-normal break-words rounded bg-gray-900 px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+          >
+            {{ t('admin.accounts.ineligibleWarning') }}
+          </span>
+        </span>
       </div>
 
-      <div v-if="hasAntigravityQuota" class="space-y-1">
+      <!-- Loading state -->
+      <div v-if="loading" class="space-y-1.5">
+        <div class="flex items-center gap-1">
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div v-else-if="error" class="text-xs text-red-500">
+        {{ error }}
+      </div>
+
+      <!-- Usage data from API -->
+      <div v-else-if="hasAntigravityQuotaFromAPI" class="space-y-1">
         <!-- Gemini 3 Pro -->
         <UsageProgressBar
-          v-if="antigravity3ProUsage !== null"
+          v-if="antigravity3ProUsageFromAPI !== null"
           :label="t('admin.accounts.usageWindow.gemini3Pro')"
-          :utilization="antigravity3ProUsage.utilization"
-          :resets-at="antigravity3ProUsage.resetTime"
+          :utilization="antigravity3ProUsageFromAPI.utilization"
+          :resets-at="antigravity3ProUsageFromAPI.resetTime"
           color="indigo"
         />
 
         <!-- Gemini 3 Flash -->
         <UsageProgressBar
-          v-if="antigravity3FlashUsage !== null"
+          v-if="antigravity3FlashUsageFromAPI !== null"
           :label="t('admin.accounts.usageWindow.gemini3Flash')"
-          :utilization="antigravity3FlashUsage.utilization"
-          :resets-at="antigravity3FlashUsage.resetTime"
+          :utilization="antigravity3FlashUsageFromAPI.utilization"
+          :resets-at="antigravity3FlashUsageFromAPI.resetTime"
           color="emerald"
         />
 
         <!-- Gemini 3 Image -->
         <UsageProgressBar
-          v-if="antigravity3ImageUsage !== null"
+          v-if="antigravity3ImageUsageFromAPI !== null"
           :label="t('admin.accounts.usageWindow.gemini3Image')"
-          :utilization="antigravity3ImageUsage.utilization"
-          :resets-at="antigravity3ImageUsage.resetTime"
+          :utilization="antigravity3ImageUsageFromAPI.utilization"
+          :resets-at="antigravity3ImageUsageFromAPI.resetTime"
           color="purple"
         />
 
         <!-- Claude 4.5 -->
         <UsageProgressBar
-          v-if="antigravityClaude45Usage !== null"
+          v-if="antigravityClaude45UsageFromAPI !== null"
           :label="t('admin.accounts.usageWindow.claude45')"
-          :utilization="antigravityClaude45Usage.utilization"
-          :resets-at="antigravityClaude45Usage.resetTime"
+          :utilization="antigravityClaude45UsageFromAPI.utilization"
+          :resets-at="antigravityClaude45UsageFromAPI.resetTime"
           color="amber"
         />
       </div>
       <div v-else class="text-xs text-gray-400">-</div>
+    </template>
+
+    <!-- Gemini platform: show quota + local usage window -->
+    <template v-else-if="account.platform === 'gemini'">
+      <!-- 账户类型徽章 -->
+      <div v-if="geminiTierLabel" class="mb-1 flex items-center gap-1">
+        <span
+          :class="[
+            'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium',
+            geminiTierClass
+          ]"
+        >
+          {{ geminiTierLabel }}
+        </span>
+        <!-- 帮助图标 -->
+        <span
+          class="group relative cursor-help"
+        >
+          <svg
+            class="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z"
+              clip-rule="evenodd"
+            />
+          </svg>
+          <span
+            class="pointer-events-none absolute left-0 top-full z-50 mt-1 w-80 whitespace-normal break-words rounded bg-gray-900 px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+          >
+            <div class="font-semibold mb-1">{{ t('admin.accounts.gemini.quotaPolicy.title') }}</div>
+            <div class="mb-2 text-gray-300">{{ t('admin.accounts.gemini.quotaPolicy.note') }}</div>
+            <div class="space-y-1">
+              <div><strong>{{ geminiQuotaPolicyChannel }}:</strong></div>
+              <div class="pl-2">• {{ geminiQuotaPolicyLimits }}</div>
+              <div class="mt-2">
+                <a :href="geminiQuotaPolicyDocsUrl" target="_blank" class="text-blue-400 hover:text-blue-300 underline">
+                  {{ t('admin.accounts.gemini.quotaPolicy.columns.docs') }} →
+                </a>
+              </div>
+            </div>
+          </span>
+        </span>
+      </div>
+
+      <div class="space-y-1">
+        <div v-if="loading" class="space-y-1">
+          <div class="flex items-center gap-1">
+            <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+            <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+            <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          </div>
+        </div>
+        <div v-else-if="error" class="text-xs text-red-500">
+          {{ error }}
+        </div>
+        <div v-else-if="geminiUsageAvailable" class="space-y-1">
+          <UsageProgressBar
+            v-if="usageInfo?.gemini_pro_daily"
+            :label="t('admin.accounts.usageWindow.geminiProDaily')"
+            :utilization="usageInfo.gemini_pro_daily.utilization"
+            :resets-at="usageInfo.gemini_pro_daily.resets_at"
+            :window-stats="usageInfo.gemini_pro_daily.window_stats"
+            :stats-title="t('admin.accounts.usageWindow.statsTitleDaily')"
+            color="indigo"
+          />
+          <UsageProgressBar
+            v-if="usageInfo?.gemini_flash_daily"
+            :label="t('admin.accounts.usageWindow.geminiFlashDaily')"
+            :utilization="usageInfo.gemini_flash_daily.utilization"
+            :resets-at="usageInfo.gemini_flash_daily.resets_at"
+            :window-stats="usageInfo.gemini_flash_daily.window_stats"
+            :stats-title="t('admin.accounts.usageWindow.statsTitleDaily')"
+            color="emerald"
+          />
+          <p class="mt-1 text-[9px] leading-tight text-gray-400 dark:text-gray-500 italic">
+            * {{ t('admin.accounts.gemini.quotaPolicy.simulatedNote') || 'Simulated quota' }}
+          </p>
+        </div>
+      </div>
     </template>
 
     <!-- Other accounts: no usage window -->
@@ -154,15 +273,20 @@
   </div>
 
   <!-- Non-OAuth/Setup-Token accounts -->
-  <div v-else class="text-xs text-gray-400">-</div>
+  <div v-else>
+    <!-- Gemini API Key accounts: show quota info -->
+    <AccountQuotaInfo v-if="account.platform === 'gemini'" :account="account" />
+    <div v-else class="text-xs text-gray-400">-</div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
-import type { Account, AccountUsageInfo } from '@/types'
+import type { Account, AccountUsageInfo, GeminiCredentials } from '@/types'
 import UsageProgressBar from './UsageProgressBar.vue'
+import AccountQuotaInfo from './AccountQuotaInfo.vue'
 
 const props = defineProps<{
   account: Account
@@ -178,6 +302,26 @@ const usageInfo = ref<AccountUsageInfo | null>(null)
 const showUsageWindows = computed(
   () => props.account.type === 'oauth' || props.account.type === 'setup-token'
 )
+
+const shouldFetchUsage = computed(() => {
+  if (props.account.platform === 'anthropic') {
+    return props.account.type === 'oauth' || props.account.type === 'setup-token'
+  }
+  if (props.account.platform === 'gemini') {
+    return props.account.type === 'oauth'
+  }
+  if (props.account.platform === 'antigravity') {
+    return props.account.type === 'oauth'
+  }
+  return false
+})
+
+const geminiUsageAvailable = computed(() => {
+  return (
+    !!usageInfo.value?.gemini_pro_daily ||
+    !!usageInfo.value?.gemini_flash_daily
+  )
+})
 
 // OpenAI Codex usage computed properties
 const hasCodexUsage = computed(() => {
@@ -327,45 +471,35 @@ const codex7dResetAt = computed(() => {
   return null
 })
 
-// Antigravity quota types
-interface AntigravityModelQuota {
-  remaining: number // 剩余百分比 0-100
-  reset_time: string // ISO 8601 重置时间
-}
-
-interface AntigravityQuotaData {
-  [model: string]: AntigravityModelQuota
-}
-
+// Antigravity quota types (用于 API 返回的数据)
 interface AntigravityUsageResult {
   utilization: number
   resetTime: string | null
 }
 
-// Antigravity quota computed properties
-const hasAntigravityQuota = computed(() => {
-  const extra = props.account.extra as Record<string, unknown> | undefined
-  return extra && typeof extra.quota === 'object' && extra.quota !== null
+// ===== Antigravity quota from API (usageInfo.antigravity_quota) =====
+
+// 检查是否有从 API 获取的配额数据
+const hasAntigravityQuotaFromAPI = computed(() => {
+  return usageInfo.value?.antigravity_quota && Object.keys(usageInfo.value.antigravity_quota).length > 0
 })
 
-// 从配额数据中获取使用率（多模型取最低剩余 = 最高使用）
-const getAntigravityUsage = (
+// 从 API 配额数据中获取使用率（多模型取最高使用率）
+const getAntigravityUsageFromAPI = (
   modelNames: string[]
 ): AntigravityUsageResult | null => {
-  const extra = props.account.extra as Record<string, unknown> | undefined
-  if (!extra || typeof extra.quota !== 'object' || extra.quota === null) return null
+  const quota = usageInfo.value?.antigravity_quota
+  if (!quota) return null
 
-  const quota = extra.quota as AntigravityQuotaData
-
-  let minRemaining = 100
+  let maxUtilization = 0
   let earliestReset: string | null = null
 
   for (const model of modelNames) {
     const modelQuota = quota[model]
     if (!modelQuota) continue
 
-    if (modelQuota.remaining < minRemaining) {
-      minRemaining = modelQuota.remaining
+    if (modelQuota.utilization > maxUtilization) {
+      maxUtilization = modelQuota.utilization
     }
     if (modelQuota.reset_time) {
       if (!earliestReset || modelQuota.reset_time < earliestReset) {
@@ -375,39 +509,155 @@ const getAntigravityUsage = (
   }
 
   // 如果没有找到任何匹配的模型
-  if (minRemaining === 100 && earliestReset === null) {
-    // 检查是否至少有一个模型有数据
+  if (maxUtilization === 0 && earliestReset === null) {
     const hasAnyData = modelNames.some((m) => quota[m])
     if (!hasAnyData) return null
   }
 
   return {
-    utilization: 100 - minRemaining,
+    utilization: maxUtilization,
     resetTime: earliestReset
   }
 }
 
-// Gemini 3 Pro: gemini-3-pro-low, gemini-3-pro-high, gemini-3-pro-preview
-const antigravity3ProUsage = computed(() =>
-  getAntigravityUsage(['gemini-3-pro-low', 'gemini-3-pro-high', 'gemini-3-pro-preview'])
+// Gemini 3 Pro from API
+const antigravity3ProUsageFromAPI = computed(() =>
+  getAntigravityUsageFromAPI(['gemini-3-pro-low', 'gemini-3-pro-high', 'gemini-3-pro-preview'])
 )
 
-// Gemini 3 Flash: gemini-3-flash
-const antigravity3FlashUsage = computed(() => getAntigravityUsage(['gemini-3-flash']))
+// Gemini 3 Flash from API
+const antigravity3FlashUsageFromAPI = computed(() => getAntigravityUsageFromAPI(['gemini-3-flash']))
 
-// Gemini 3 Image: gemini-3-pro-image
-const antigravity3ImageUsage = computed(() => getAntigravityUsage(['gemini-3-pro-image']))
+// Gemini 3 Image from API
+const antigravity3ImageUsageFromAPI = computed(() => getAntigravityUsageFromAPI(['gemini-3-pro-image']))
 
-// Claude 4.5: claude-sonnet-4-5, claude-opus-4-5-thinking
-const antigravityClaude45Usage = computed(() =>
-  getAntigravityUsage(['claude-sonnet-4-5', 'claude-opus-4-5-thinking'])
+// Claude 4.5 from API
+const antigravityClaude45UsageFromAPI = computed(() =>
+  getAntigravityUsageFromAPI(['claude-sonnet-4-5', 'claude-opus-4-5-thinking'])
 )
 
-// Antigravity 账户类型
+// Antigravity 账户类型（从 load_code_assist 响应中提取）
 const antigravityTier = computed(() => {
   const extra = props.account.extra as Record<string, unknown> | undefined
-  if (!extra || typeof extra.tier !== 'string') return null
-  return extra.tier as string
+  if (!extra) return null
+
+  const loadCodeAssist = extra.load_code_assist as Record<string, unknown> | undefined
+  if (!loadCodeAssist) return null
+
+  // 优先取 paidTier，否则取 currentTier
+  const paidTier = loadCodeAssist.paidTier as Record<string, unknown> | undefined
+  if (paidTier && typeof paidTier.id === 'string') {
+    return paidTier.id
+  }
+
+  const currentTier = loadCodeAssist.currentTier as Record<string, unknown> | undefined
+  if (currentTier && typeof currentTier.id === 'string') {
+    return currentTier.id
+  }
+
+  return null
+})
+
+// Gemini 账户类型（从 credentials 中提取）
+const geminiTier = computed(() => {
+  if (props.account.platform !== 'gemini') return null
+  const creds = props.account.credentials as GeminiCredentials | undefined
+  return creds?.tier_id || null
+})
+
+// Gemini 是否为 Code Assist OAuth
+const isGeminiCodeAssist = computed(() => {
+  if (props.account.platform !== 'gemini') return false
+  const creds = props.account.credentials as GeminiCredentials | undefined
+  return creds?.oauth_type === 'code_assist' || (!creds?.oauth_type && !!creds?.project_id)
+})
+
+// Gemini 账户类型显示标签
+const geminiTierLabel = computed(() => {
+  if (!geminiTier.value) return null
+
+  const creds = props.account.credentials as GeminiCredentials | undefined
+  const isGoogleOne = creds?.oauth_type === 'google_one'
+
+  if (isGoogleOne) {
+    // Google One tier 标签
+    const tierMap: Record<string, string> = {
+      AI_PREMIUM: t('admin.accounts.tier.aiPremium'),
+      GOOGLE_ONE_STANDARD: t('admin.accounts.tier.standard'),
+      GOOGLE_ONE_BASIC: t('admin.accounts.tier.basic'),
+      FREE: t('admin.accounts.tier.free'),
+      GOOGLE_ONE_UNKNOWN: t('admin.accounts.tier.personal'),
+      GOOGLE_ONE_UNLIMITED: t('admin.accounts.tier.unlimited')
+    }
+    return tierMap[geminiTier.value] || t('admin.accounts.tier.personal')
+  }
+
+  // Code Assist tier 标签
+  const tierMap: Record<string, string> = {
+    LEGACY: t('admin.accounts.tier.free'),
+    PRO: t('admin.accounts.tier.pro'),
+    ULTRA: t('admin.accounts.tier.ultra')
+  }
+  return tierMap[geminiTier.value] || null
+})
+
+// Gemini 账户类型徽章样式
+const geminiTierClass = computed(() => {
+  if (!geminiTier.value) return ''
+
+  const creds = props.account.credentials as GeminiCredentials | undefined
+  const isGoogleOne = creds?.oauth_type === 'google_one'
+
+  if (isGoogleOne) {
+    // Google One tier 颜色
+    const colorMap: Record<string, string> = {
+      AI_PREMIUM: 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300',
+      GOOGLE_ONE_STANDARD: 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300',
+      GOOGLE_ONE_BASIC: 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300',
+      FREE: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+      GOOGLE_ONE_UNKNOWN: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+      GOOGLE_ONE_UNLIMITED: 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300'
+    }
+    return colorMap[geminiTier.value] || 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  }
+
+  // Code Assist tier 颜色
+  switch (geminiTier.value) {
+    case 'LEGACY':
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+    case 'PRO':
+      return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
+    case 'ULTRA':
+      return 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300'
+    default:
+      return ''
+  }
+})
+
+// Gemini 配额政策信息
+const geminiQuotaPolicyChannel = computed(() => {
+  if (isGeminiCodeAssist.value) {
+    return t('admin.accounts.gemini.quotaPolicy.rows.cli.channel')
+  }
+  return t('admin.accounts.gemini.quotaPolicy.rows.aiStudio.channel')
+})
+
+const geminiQuotaPolicyLimits = computed(() => {
+  if (isGeminiCodeAssist.value) {
+    if (geminiTier.value === 'PRO' || geminiTier.value === 'ULTRA') {
+      return t('admin.accounts.gemini.quotaPolicy.rows.cli.limitsPremium')
+    }
+    return t('admin.accounts.gemini.quotaPolicy.rows.cli.limitsFree')
+  }
+  // AI Studio - 默认显示免费层限制
+  return t('admin.accounts.gemini.quotaPolicy.rows.aiStudio.limitsFree')
+})
+
+const geminiQuotaPolicyDocsUrl = computed(() => {
+  if (isGeminiCodeAssist.value) {
+    return 'https://cloud.google.com/products/gemini/code-assist#pricing'
+  }
+  return 'https://ai.google.dev/pricing'
 })
 
 // 账户类型显示标签
@@ -438,11 +688,20 @@ const antigravityTierClass = computed(() => {
   }
 })
 
+// 检测账户是否有不合格状态（ineligibleTiers）
+const hasIneligibleTiers = computed(() => {
+  const extra = props.account.extra as Record<string, unknown> | undefined
+  if (!extra) return false
+
+  const loadCodeAssist = extra.load_code_assist as Record<string, unknown> | undefined
+  if (!loadCodeAssist) return false
+
+  const ineligibleTiers = loadCodeAssist.ineligibleTiers as unknown[] | undefined
+  return Array.isArray(ineligibleTiers) && ineligibleTiers.length > 0
+})
+
 const loadUsage = async () => {
-  // Fetch usage for Anthropic OAuth and Setup Token accounts
-  // OpenAI usage comes from account.extra field (updated during forwarding)
-  if (props.account.platform !== 'anthropic') return
-  if (props.account.type !== 'oauth' && props.account.type !== 'setup-token') return
+  if (!shouldFetchUsage.value) return
 
   loading.value = true
   error.value = null

@@ -20,6 +20,8 @@ English | [中文](README_CN.md)
 
 Try Sub2API online: **https://v2.pincc.ai/**
 
+Demo credentials (shared demo environment; **not** created automatically for self-hosted installs):
+
 | Email | Password |
 |-------|----------|
 | admin@sub2api.com | admin123 |
@@ -260,8 +262,10 @@ jwt:
   expire_hour: 24
 
 default:
-  admin_email: "admin@example.com"
-  admin_password: "admin123"
+  user_concurrency: 5
+  user_balance: 0
+  api_key_prefix: "sk-"
+  rate_multiplier: 1.0
 ```
 
 ```bash
@@ -280,6 +284,26 @@ go run ./cmd/server
 cd frontend
 npm run dev
 ```
+
+#### Code Generation
+
+When editing `backend/ent/schema`, regenerate Ent + Wire:
+
+```bash
+cd backend
+go generate ./ent
+go generate ./cmd/server
+```
+
+---
+
+## Simple Mode
+
+Simple Mode is designed for individual developers or internal teams who want quick access without full SaaS features.
+
+- Enable: Set environment variable `RUN_MODE=simple`
+- Difference: Hides SaaS-related features and skips billing process
+- Security note: In production, you must also set `SIMPLE_MODE_CONFIRM=true` to allow startup
 
 ---
 
@@ -306,6 +330,12 @@ export ANTHROPIC_AUTH_TOKEN="sk-xxx"
 Antigravity accounts support optional **hybrid scheduling**. When enabled, the general endpoints `/v1/messages` and `/v1beta/` will also route requests to Antigravity accounts.
 
 > **⚠️ Warning**: Anthropic Claude and Antigravity Claude **cannot be mixed within the same conversation context**. Use groups to isolate them properly.
+
+### Known Issues
+
+In Claude Code, Plan Mode cannot exit automatically. (Normally when using the native Claude API, after planning is complete, Claude Code will pop up options for users to approve or reject the plan.)
+
+**Workaround**: Press `Shift + Tab` to manually exit Plan Mode, then type your response to approve or reject the plan.
 
 ---
 
