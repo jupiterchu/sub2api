@@ -33,6 +33,7 @@ frontend/dist/
 *.local
 *.tsbuildinfo
 vite.config.d.ts
+vite.config.js.timestamp-*
 
 # 日志
 npm-debug.log*
@@ -48,6 +49,7 @@ pnpm-debug.log*
 .env.*.local
 *.env
 !.env.example
+docker-compose.override.yml
 
 # ===================
 # IDE / 编辑器
@@ -118,3 +120,6 @@ docs/
 code-reviews/
 AGENTS.md
 backend/cmd/server/server
+deploy/docker-compose.override.yml
+.gocache/
+vite.config.js

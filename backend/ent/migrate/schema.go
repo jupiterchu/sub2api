@@ -9,141 +9,6 @@ import (
 )
 
 var (
-	// AccountsColumns holds the columns for the "accounts" table.
-	AccountsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt64, Increment: true},
-		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "name", Type: field.TypeString, Size: 100},
-		{Name: "platform", Type: field.TypeString, Size: 50},
-		{Name: "type", Type: field.TypeString, Size: 20},
-		{Name: "credentials", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
-		{Name: "extra", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
-		{Name: "concurrency", Type: field.TypeInt, Default: 3},
-		{Name: "priority", Type: field.TypeInt, Default: 50},
-		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
-		{Name: "error_message", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
-		{Name: "last_used_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "schedulable", Type: field.TypeBool, Default: true},
-		{Name: "rate_limited_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "rate_limit_reset_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "overload_until", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "session_window_start", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
-		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
-	}
-	// AccountsTable holds the schema information for the "accounts" table.
-	AccountsTable = &schema.Table{
-		Name:       "accounts",
-		Columns:    AccountsColumns,
-		PrimaryKey: []*schema.Column{AccountsColumns[0]},
-		ForeignKeys: []*schema.ForeignKey{
-			{
-				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[21]},
-				RefColumns: []*schema.Column{ProxiesColumns[0]},
-				OnDelete:   schema.SetNull,
-			},
-		},
-		Indexes: []*schema.Index{
-			{
-				Name:    "account_platform",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[5]},
-			},
-			{
-				Name:    "account_type",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6]},
-			},
-			{
-				Name:    "account_status",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[11]},
-			},
-			{
-				Name:    "account_proxy_id",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
-			},
-			{
-				Name:    "account_priority",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[10]},
-			},
-			{
-				Name:    "account_last_used_at",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13]},
-			},
-			{
-				Name:    "account_schedulable",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[14]},
-			},
-			{
-				Name:    "account_rate_limited_at",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[15]},
-			},
-			{
-				Name:    "account_rate_limit_reset_at",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[16]},
-			},
-			{
-				Name:    "account_overload_until",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17]},
-			},
-			{
-				Name:    "account_deleted_at",
-				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[3]},
-			},
-		},
-	}
-	// AccountGroupsColumns holds the columns for the "account_groups" table.
-	AccountGroupsColumns = []*schema.Column{
-		{Name: "priority", Type: field.TypeInt, Default: 50},
-		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "account_id", Type: field.TypeInt64},
-		{Name: "group_id", Type: field.TypeInt64},
-	}
-	// AccountGroupsTable holds the schema information for the "account_groups" table.
-	AccountGroupsTable = &schema.Table{
-		Name:       "account_groups",
-		Columns:    AccountGroupsColumns,
-		PrimaryKey: []*schema.Column{AccountGroupsColumns[2], AccountGroupsColumns[3]},
-		ForeignKeys: []*schema.ForeignKey{
-			{
-				Symbol:     "account_groups_accounts_account",
-				Columns:    []*schema.Column{AccountGroupsColumns[2]},
-				RefColumns: []*schema.Column{AccountsColumns[0]},
-				OnDelete:   schema.NoAction,
-			},
-			{
-				Symbol:     "account_groups_groups_group",
-				Columns:    []*schema.Column{AccountGroupsColumns[3]},
-				RefColumns: []*schema.Column{GroupsColumns[0]},
-				OnDelete:   schema.NoAction,
-			},
-		},
-		Indexes: []*schema.Index{
-			{
-				Name:    "accountgroup_group_id",
-				Unique:  false,
-				Columns: []*schema.Column{AccountGroupsColumns[3]},
-			},
-			{
-				Name:    "accountgroup_priority",
-				Unique:  false,
-				Columns: []*schema.Column{AccountGroupsColumns[0]},
-			},
-		},
-	}
 	// APIKeysColumns holds the columns for the "api_keys" table.
 	APIKeysColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -195,6 +60,142 @@ var (
 				Name:    "apikey_deleted_at",
 				Unique:  false,
 				Columns: []*schema.Column{APIKeysColumns[3]},
+			},
+		},
+	}
+	// AccountsColumns holds the columns for the "accounts" table.
+	AccountsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "platform", Type: field.TypeString, Size: 50},
+		{Name: "type", Type: field.TypeString, Size: 20},
+		{Name: "credentials", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "extra", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "concurrency", Type: field.TypeInt, Default: 3},
+		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+		{Name: "error_message", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "schedulable", Type: field.TypeBool, Default: true},
+		{Name: "rate_limited_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "rate_limit_reset_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "overload_until", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "session_window_start", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
+		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
+	}
+	// AccountsTable holds the schema information for the "accounts" table.
+	AccountsTable = &schema.Table{
+		Name:       "accounts",
+		Columns:    AccountsColumns,
+		PrimaryKey: []*schema.Column{AccountsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "accounts_proxies_proxy",
+				Columns:    []*schema.Column{AccountsColumns[22]},
+				RefColumns: []*schema.Column{ProxiesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "account_platform",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[6]},
+			},
+			{
+				Name:    "account_type",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[7]},
+			},
+			{
+				Name:    "account_status",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[12]},
+			},
+			{
+				Name:    "account_proxy_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[22]},
+			},
+			{
+				Name:    "account_priority",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[11]},
+			},
+			{
+				Name:    "account_last_used_at",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[14]},
+			},
+			{
+				Name:    "account_schedulable",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[15]},
+			},
+			{
+				Name:    "account_rate_limited_at",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[16]},
+			},
+			{
+				Name:    "account_rate_limit_reset_at",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[17]},
+			},
+			{
+				Name:    "account_overload_until",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[18]},
+			},
+			{
+				Name:    "account_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[3]},
+			},
+		},
+	}
+	// AccountGroupsColumns holds the columns for the "account_groups" table.
+	AccountGroupsColumns = []*schema.Column{
+		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "group_id", Type: field.TypeInt64},
+	}
+	// AccountGroupsTable holds the schema information for the "account_groups" table.
+	AccountGroupsTable = &schema.Table{
+		Name:       "account_groups",
+		Columns:    AccountGroupsColumns,
+		PrimaryKey: []*schema.Column{AccountGroupsColumns[2], AccountGroupsColumns[3]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "account_groups_accounts_account",
+				Columns:    []*schema.Column{AccountGroupsColumns[2]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "account_groups_groups_group",
+				Columns:    []*schema.Column{AccountGroupsColumns[3]},
+				RefColumns: []*schema.Column{GroupsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "accountgroup_group_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountGroupsColumns[3]},
+			},
+			{
+				Name:    "accountgroup_priority",
+				Unique:  false,
+				Columns: []*schema.Column{AccountGroupsColumns[0]},
 			},
 		},
 	}
@@ -368,8 +369,8 @@ var (
 		{Name: "duration_ms", Type: field.TypeInt, Nullable: true},
 		{Name: "first_token_ms", Type: field.TypeInt, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "account_id", Type: field.TypeInt64},
 		{Name: "api_key_id", Type: field.TypeInt64},
+		{Name: "account_id", Type: field.TypeInt64},
 		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "user_id", Type: field.TypeInt64},
 		{Name: "subscription_id", Type: field.TypeInt64, Nullable: true},
@@ -381,15 +382,15 @@ var (
 		PrimaryKey: []*schema.Column{UsageLogsColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "usage_logs_accounts_usage_logs",
+				Symbol:     "usage_logs_api_keys_usage_logs",
 				Columns:    []*schema.Column{UsageLogsColumns[21]},
-				RefColumns: []*schema.Column{AccountsColumns[0]},
+				RefColumns: []*schema.Column{APIKeysColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
-				Symbol:     "usage_logs_api_keys_usage_logs",
+				Symbol:     "usage_logs_accounts_usage_logs",
 				Columns:    []*schema.Column{UsageLogsColumns[22]},
-				RefColumns: []*schema.Column{APIKeysColumns[0]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
@@ -420,12 +421,12 @@ var (
 			{
 				Name:    "usagelog_api_key_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogsColumns[22]},
+				Columns: []*schema.Column{UsageLogsColumns[21]},
 			},
 			{
 				Name:    "usagelog_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogsColumns[21]},
+				Columns: []*schema.Column{UsageLogsColumns[22]},
 			},
 			{
 				Name:    "usagelog_group_id",
@@ -460,7 +461,7 @@ var (
 			{
 				Name:    "usagelog_api_key_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogsColumns[22], UsageLogsColumns[20]},
+				Columns: []*schema.Column{UsageLogsColumns[21], UsageLogsColumns[20]},
 			},
 		},
 	}
@@ -702,9 +703,9 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		APIKeysTable,
 		AccountsTable,
 		AccountGroupsTable,
-		APIKeysTable,
 		GroupsTable,
 		ProxiesTable,
 		RedeemCodesTable,
@@ -719,6 +720,11 @@ var (
 )
 
 func init() {
+	APIKeysTable.ForeignKeys[0].RefTable = GroupsTable
+	APIKeysTable.ForeignKeys[1].RefTable = UsersTable
+	APIKeysTable.Annotation = &entsql.Annotation{
+		Table: "api_keys",
+	}
 	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
@@ -727,11 +733,6 @@ func init() {
 	AccountGroupsTable.ForeignKeys[1].RefTable = GroupsTable
 	AccountGroupsTable.Annotation = &entsql.Annotation{
 		Table: "account_groups",
-	}
-	APIKeysTable.ForeignKeys[0].RefTable = GroupsTable
-	APIKeysTable.ForeignKeys[1].RefTable = UsersTable
-	APIKeysTable.Annotation = &entsql.Annotation{
-		Table: "api_keys",
 	}
 	GroupsTable.Annotation = &entsql.Annotation{
 		Table: "groups",
@@ -747,8 +748,8 @@ func init() {
 	SettingsTable.Annotation = &entsql.Annotation{
 		Table: "settings",
 	}
-	UsageLogsTable.ForeignKeys[0].RefTable = AccountsTable
-	UsageLogsTable.ForeignKeys[1].RefTable = APIKeysTable
+	UsageLogsTable.ForeignKeys[0].RefTable = APIKeysTable
+	UsageLogsTable.ForeignKeys[1].RefTable = AccountsTable
 	UsageLogsTable.ForeignKeys[2].RefTable = GroupsTable
 	UsageLogsTable.ForeignKeys[3].RefTable = UsersTable
 	UsageLogsTable.ForeignKeys[4].RefTable = UserSubscriptionsTable

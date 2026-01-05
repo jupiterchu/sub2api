@@ -218,20 +218,23 @@ Build and run from source code for development or customization.
 git clone https://github.com/Wei-Shaw/sub2api.git
 cd sub2api
 
-# 2. Build frontend
+# 2. Install pnpm (if not already installed)
+npm install -g pnpm
+
+# 3. Build frontend
 cd frontend
-npm install
-npm run build
+pnpm install
+pnpm run build
 # Output will be in ../backend/internal/web/dist/
 
-# 3. Build backend with embedded frontend
+# 4. Build backend with embedded frontend
 cd ../backend
 go build -tags embed -o sub2api ./cmd/server
 
-# 4. Create configuration file
+# 5. Create configuration file
 cp ../deploy/config.example.yaml ./config.yaml
 
-# 5. Edit configuration
+# 6. Edit configuration
 nano config.yaml
 ```
 
@@ -268,6 +271,15 @@ default:
   rate_multiplier: 1.0
 ```
 
+Additional security-related options are available in `config.yaml`:
+
+- `cors.allowed_origins` for CORS allowlist
+- `security.url_allowlist` for upstream/pricing/CRS host allowlists
+- `security.csp` to control Content-Security-Policy headers
+- `billing.circuit_breaker` to fail closed on billing errors
+- `server.trusted_proxies` to enable X-Forwarded-For parsing
+- `turnstile.required` to require Turnstile in release mode
+
 ```bash
 # 6. Run the application
 ./sub2api
@@ -282,7 +294,7 @@ go run ./cmd/server
 
 # Frontend (with hot reload)
 cd frontend
-npm run dev
+pnpm run dev
 ```
 
 #### Code Generation
