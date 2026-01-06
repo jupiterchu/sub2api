@@ -34,6 +34,7 @@ type LiteLLMModelPricing struct {
 	LiteLLMProvider             string  `json:"litellm_provider"`
 	Mode                        string  `json:"mode"`
 	SupportsPromptCaching       bool    `json:"supports_prompt_caching"`
+	OutputCostPerImage          float64 `json:"output_cost_per_image"` // 图片生成模型每张图片价格
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -51,6 +52,7 @@ type LiteLLMRawEntry struct {
 	LiteLLMProvider             string   `json:"litellm_provider"`
 	Mode                        string   `json:"mode"`
 	SupportsPromptCaching       bool     `json:"supports_prompt_caching"`
+	OutputCostPerImage          *float64 `json:"output_cost_per_image"`
 }
 
 // PricingService 动态价格服务
@@ -319,6 +321,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		if entry.CacheReadInputTokenCost != nil {
 			pricing.CacheReadInputTokenCost = *entry.CacheReadInputTokenCost
 		}
+		if entry.OutputCostPerImage != nil {
+			pricing.OutputCostPerImage = *entry.OutputCostPerImage
+		}
 
 		result[modelName] = pricing
 	}
@@ -409,6 +414,13 @@ func (s *PricingService) fetchRemoteHash() (string, error) {
 }
 
 func (s *PricingService) validatePricingURL(raw string) (string, error) {
+	if s.cfg != nil && !s.cfg.Security.URLAllowlist.Enabled {
+		normalized, err := urlvalidator.ValidateURLFormat(raw, s.cfg.Security.URLAllowlist.AllowInsecureHTTP)
+		if err != nil {
+			return "", fmt.Errorf("invalid pricing url: %w", err)
+		}
+		return normalized, nil
+	}
 	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
 		AllowedHosts:     s.cfg.Security.URLAllowlist.PricingHosts,
 		RequireAllowlist: true,

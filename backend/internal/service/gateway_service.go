@@ -104,6 +104,10 @@ type ForwardResult struct {
 	Stream       bool
 	Duration     time.Duration
 	FirstTokenMs *int // 首字时间（流式请求）
+
+	// 图片生成计费字段（仅 gemini-3-pro-image 使用）
+	ImageCount int    // 生成的图片数量
+	ImageSize  string // 图片尺寸 "1K", "2K", "4K"
 }
 
 // UpstreamFailoverError indicates an upstream error that should trigger account failover.
@@ -1700,6 +1704,10 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
+	if s.cfg != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	}
+
 	// 设置SSE响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -1954,8 +1962,15 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
 
+	contentType := "application/json"
+	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
+		if upstreamType := resp.Header.Get("Content-Type"); upstreamType != "" {
+			contentType = upstreamType
+		}
+	}
+
 	// 写入响应
-	c.Data(resp.StatusCode, "application/json", body)
+	c.Data(resp.StatusCode, contentType, body)
 
 	return &response.Usage, nil
 }
@@ -1998,25 +2013,40 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	account := input.Account
 	subscription := input.Subscription
 
-	// 计算费用
-	tokens := UsageTokens{
-		InputTokens:         result.Usage.InputTokens,
-		OutputTokens:        result.Usage.OutputTokens,
-		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:     result.Usage.CacheReadInputTokens,
-	}
-
 	// 获取费率倍数
 	multiplier := s.cfg.Default.RateMultiplier
 	if apiKey.GroupID != nil && apiKey.Group != nil {
 		multiplier = apiKey.Group.RateMultiplier
 	}
 
-	cost, err := s.billingService.CalculateCost(result.Model, tokens, multiplier)
-	if err != nil {
-		log.Printf("Calculate cost failed: %v", err)
-		// 使用默认费用继续
-		cost = &CostBreakdown{ActualCost: 0}
+	var cost *CostBreakdown
+
+	// 根据请求类型选择计费方式
+	if result.ImageCount > 0 {
+		// 图片生成计费
+		var groupConfig *ImagePriceConfig
+		if apiKey.Group != nil {
+			groupConfig = &ImagePriceConfig{
+				Price1K: apiKey.Group.ImagePrice1K,
+				Price2K: apiKey.Group.ImagePrice2K,
+				Price4K: apiKey.Group.ImagePrice4K,
+			}
+		}
+		cost = s.billingService.CalculateImageCost(result.Model, result.ImageSize, result.ImageCount, groupConfig, multiplier)
+	} else {
+		// Token 计费
+		tokens := UsageTokens{
+			InputTokens:         result.Usage.InputTokens,
+			OutputTokens:        result.Usage.OutputTokens,
+			CacheCreationTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadTokens:     result.Usage.CacheReadInputTokens,
+		}
+		var err error
+		cost, err = s.billingService.CalculateCost(result.Model, tokens, multiplier)
+		if err != nil {
+			log.Printf("Calculate cost failed: %v", err)
+			cost = &CostBreakdown{ActualCost: 0}
+		}
 	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
@@ -2028,6 +2058,10 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 
 	// 创建使用日志
 	durationMs := int(result.Duration.Milliseconds())
+	var imageSize *string
+	if result.ImageSize != "" {
+		imageSize = &result.ImageSize
+	}
 	usageLog := &UsageLog{
 		UserID:              user.ID,
 		APIKeyID:            apiKey.ID,
@@ -2049,6 +2083,8 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		Stream:              result.Stream,
 		DurationMs:          &durationMs,
 		FirstTokenMs:        result.FirstTokenMs,
+		ImageCount:          result.ImageCount,
+		ImageSize:           imageSize,
 		CreatedAt:           time.Now(),
 	}
 
@@ -2311,6 +2347,13 @@ func (s *GatewayService) countTokensError(c *gin.Context, status int, errType, m
 }
 
 func (s *GatewayService) validateUpstreamBaseURL(raw string) (string, error) {
+	if s.cfg != nil && !s.cfg.Security.URLAllowlist.Enabled {
+		normalized, err := urlvalidator.ValidateURLFormat(raw, s.cfg.Security.URLAllowlist.AllowInsecureHTTP)
+		if err != nil {
+			return "", fmt.Errorf("invalid base_url: %w", err)
+		}
+		return normalized, nil
+	}
 	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
 		AllowedHosts:     s.cfg.Security.URLAllowlist.UpstreamHosts,
 		RequireAllowlist: true,
