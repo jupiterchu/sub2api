@@ -1436,17 +1436,26 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	// 处理错误响应（不可重试的错误）
 	if resp.StatusCode >= 400 {
-		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
-		if resp.StatusCode == 400 && s.cfg != nil && s.cfg.Gateway.FailoverOn400 {
+		// 对于 400 错误，检查是否需要触发 failover
+		if resp.StatusCode == 400 {
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			if readErr != nil {
-				// ReadAll failed, fall back to normal error handling without consuming the stream
 				return s.handleErrorResponse(ctx, resp, c, account)
 			}
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-			if s.shouldFailoverOn400(respBody) {
+			msg := strings.ToLower(extractUpstreamErrorMessage(respBody))
+
+			// 账号/组织被禁用：无条件触发 failover 并标记账号错误
+			if strings.Contains(msg, "has been disabled") {
+				_ = s.accountRepo.SetError(ctx, account.ID, "Organization disabled (400): "+msg)
+				log.Printf("Account %d: organization disabled, marked as error and switching", account.ID)
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+			}
+
+			// 可选：对部分 400 触发 failover（需开启配置）
+			if s.cfg != nil && s.cfg.Gateway.FailoverOn400 && s.shouldFailoverOn400(respBody) {
 				if s.cfg.Gateway.LogUpstreamErrorBody {
 					log.Printf(
 						"Account %d: 400 error, attempting failover: %s",
