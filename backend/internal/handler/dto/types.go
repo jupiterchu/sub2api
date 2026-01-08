@@ -52,6 +52,10 @@ type Group struct {
 	ImagePrice2K *float64 `json:"image_price_2k"`
 	ImagePrice4K *float64 `json:"image_price_4k"`
 
+	// Claude Code 客户端限制
+	ClaudeCodeOnly  bool   `json:"claude_code_only"`
+	FallbackGroupID *int64 `json:"fallback_group_id"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -180,13 +184,23 @@ type UsageLog struct {
 	ImageCount int     `json:"image_count"`
 	ImageSize  *string `json:"image_size"`
 
+	// User-Agent
+	UserAgent *string `json:"user_agent"`
+
 	CreatedAt time.Time `json:"created_at"`
 
 	User         *User             `json:"user,omitempty"`
 	APIKey       *APIKey           `json:"api_key,omitempty"`
-	Account      *Account          `json:"account,omitempty"`
+	Account      *AccountSummary   `json:"account,omitempty"` // Use minimal AccountSummary to prevent data leakage
 	Group        *Group            `json:"group,omitempty"`
 	Subscription *UserSubscription `json:"subscription,omitempty"`
+}
+
+// AccountSummary is a minimal account info for usage log display.
+// It intentionally excludes sensitive fields like Credentials, Proxy, etc.
+type AccountSummary struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type Setting struct {

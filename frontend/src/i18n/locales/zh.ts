@@ -421,7 +421,8 @@ export default {
     billingType: '消费类型',
     balance: '余额',
     subscription: '订阅',
-    imageUnit: '张'
+    imageUnit: '张',
+    userAgent: 'User-Agent'
   },
 
   // Redeem
@@ -933,6 +934,15 @@ export default {
       imagePricing: {
         title: '图片生成计费',
         description: '配置 gemini-3-pro-image 模型的图片生成价格，留空则使用默认价格'
+      },
+      claudeCode: {
+        title: 'Claude Code 客户端限制',
+        tooltip: '启用后，此分组仅允许 Claude Code 官方客户端访问。非 Claude Code 请求将被拒绝或降级到指定分组。',
+        enabled: '仅限 Claude Code',
+        disabled: '允许所有客户端',
+        fallbackGroup: '降级分组',
+        fallbackHint: '非 Claude Code 请求将使用此分组，留空则直接拒绝',
+        noFallback: '不降级（直接拒绝）'
       }
     },
 
@@ -1646,6 +1656,7 @@ export default {
         protocol: '协议',
         address: '地址',
         status: '状态',
+        accounts: '账号数',
         actions: '操作',
         nameLabel: '名称',
         namePlaceholder: '请输入代理名称',
