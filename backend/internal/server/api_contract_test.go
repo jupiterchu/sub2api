@@ -326,7 +326,8 @@ func TestAPIContracts(t *testing.T) {
 					"fallback_model_gemini": "gemini-2.5-pro",
 					"fallback_model_openai": "gpt-4o",
 					"enable_identity_patch": true,
-					"identity_patch_prompt": ""
+					"identity_patch_prompt": "",
+					"home_content": ""
 				}
 			}`,
 		},
@@ -389,11 +390,11 @@ func newContractDeps(t *testing.T) *contractDeps {
 		RunMode: config.RunModeStandard,
 	}
 
-	userService := service.NewUserService(userRepo)
+	userService := service.NewUserService(userRepo, nil)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, apiKeyCache, cfg)
 
 	usageRepo := newStubUsageLogRepo()
-	usageService := service.NewUsageService(usageRepo, userRepo, nil)
+	usageService := service.NewUsageService(usageRepo, userRepo, nil, nil)
 
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
@@ -562,6 +563,18 @@ func (stubApiKeyCache) IncrementDailyUsage(ctx context.Context, apiKey string) e
 }
 
 func (stubApiKeyCache) SetDailyUsageExpiry(ctx context.Context, apiKey string, ttl time.Duration) error {
+	return nil
+}
+
+func (stubApiKeyCache) GetAuthCache(ctx context.Context, key string) (*service.APIKeyAuthCacheEntry, error) {
+	return nil, nil
+}
+
+func (stubApiKeyCache) SetAuthCache(ctx context.Context, key string, entry *service.APIKeyAuthCacheEntry, ttl time.Duration) error {
+	return nil
+}
+
+func (stubApiKeyCache) DeleteAuthCache(ctx context.Context, key string) error {
 	return nil
 }
 
@@ -737,12 +750,12 @@ func (r *stubApiKeyRepo) GetByID(ctx context.Context, id int64) (*service.APIKey
 	return &clone, nil
 }
 
-func (r *stubApiKeyRepo) GetOwnerID(ctx context.Context, id int64) (int64, error) {
+func (r *stubApiKeyRepo) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
 	key, ok := r.byID[id]
 	if !ok {
-		return 0, service.ErrAPIKeyNotFound
+		return "", 0, service.ErrAPIKeyNotFound
 	}
-	return key.UserID, nil
+	return key.Key, key.UserID, nil
 }
 
 func (r *stubApiKeyRepo) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
@@ -752,6 +765,10 @@ func (r *stubApiKeyRepo) GetByKey(ctx context.Context, key string) (*service.API
 	}
 	clone := *found
 	return &clone, nil
+}
+
+func (r *stubApiKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
+	return r.GetByKey(ctx, key)
 }
 
 func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error {
@@ -866,6 +883,14 @@ func (r *stubApiKeyRepo) ClearGroupIDByGroupID(ctx context.Context, groupID int6
 
 func (r *stubApiKeyRepo) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	return 0, errors.New("not implemented")
+}
+
+func (r *stubApiKeyRepo) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubApiKeyRepo) ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error) {
+	return nil, errors.New("not implemented")
 }
 
 type stubUsageLogRepo struct {
