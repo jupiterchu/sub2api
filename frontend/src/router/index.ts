@@ -5,6 +5,7 @@
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 
 /**
  * Route definitions with lazy loading
@@ -173,6 +174,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/ops',
+    name: 'AdminOps',
+    component: () => import('@/views/admin/ops/OpsDashboard.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Ops Monitoring',
+      titleKey: 'admin.ops.title',
+      descriptionKey: 'admin.ops.description'
+    }
+  },
+  {
     path: '/admin/users',
     name: 'AdminUsers',
     component: () => import('@/views/admin/UsersView.vue'),
@@ -323,10 +336,12 @@ router.beforeEach((to, _from, next) => {
   }
 
   // Set page title
+  const appStore = useAppStore()
+  const siteName = appStore.siteName || 'Sub2API'
   if (to.meta.title) {
-    document.title = `${to.meta.title} - Sub2API`
+    document.title = `${to.meta.title} - ${siteName}`
   } else {
-    document.title = 'Sub2API'
+    document.title = siteName
   }
 
   // Check if route requires authentication

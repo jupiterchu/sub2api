@@ -1,10 +1,12 @@
 package service
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/google/wire"
+	"github.com/redis/go-redis/v9"
 )
 
 // BuildInfo contains build information
@@ -47,6 +49,13 @@ func ProvideTokenRefreshService(
 	return svc
 }
 
+// ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
+func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, cfg *config.Config) *DashboardAggregationService {
+	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideAccountExpiryService creates and starts AccountExpiryService.
 func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpiryService {
 	svc := NewAccountExpiryService(accountRepo, time.Minute)
@@ -77,12 +86,100 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 	return svc
 }
 
+// ProvideRateLimitService creates RateLimitService with optional dependencies.
+func ProvideRateLimitService(
+	accountRepo AccountRepository,
+	usageRepo UsageLogRepository,
+	cfg *config.Config,
+	geminiQuotaService *GeminiQuotaService,
+	tempUnschedCache TempUnschedCache,
+	timeoutCounterCache TimeoutCounterCache,
+	settingService *SettingService,
+) *RateLimitService {
+	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
+	svc.SetTimeoutCounterCache(timeoutCounterCache)
+	svc.SetSettingService(settingService)
+	return svc
+}
+
+// ProvideOpsMetricsCollector creates and starts OpsMetricsCollector.
+func ProvideOpsMetricsCollector(
+	opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	accountRepo AccountRepository,
+	concurrencyService *ConcurrencyService,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+) *OpsMetricsCollector {
+	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
+	collector.Start()
+	return collector
+}
+
+// ProvideOpsAggregationService creates and starts OpsAggregationService (hourly/daily pre-aggregation).
+func ProvideOpsAggregationService(
+	opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+) *OpsAggregationService {
+	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
+	svc.Start()
+	return svc
+}
+
+// ProvideOpsAlertEvaluatorService creates and starts OpsAlertEvaluatorService.
+func ProvideOpsAlertEvaluatorService(
+	opsService *OpsService,
+	opsRepo OpsRepository,
+	emailService *EmailService,
+	redisClient *redis.Client,
+	cfg *config.Config,
+) *OpsAlertEvaluatorService {
+	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg)
+	svc.Start()
+	return svc
+}
+
+// ProvideOpsCleanupService creates and starts OpsCleanupService (cron scheduled).
+func ProvideOpsCleanupService(
+	opsRepo OpsRepository,
+	db *sql.DB,
+	redisClient *redis.Client,
+	cfg *config.Config,
+) *OpsCleanupService {
+	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg)
+	svc.Start()
+	return svc
+}
+
+// ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
+func ProvideOpsScheduledReportService(
+	opsService *OpsService,
+	userService *UserService,
+	emailService *EmailService,
+	redisClient *redis.Client,
+	cfg *config.Config,
+) *OpsScheduledReportService {
+	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
+	svc.Start()
+	return svc
+}
+
+// ProvideAPIKeyAuthCacheInvalidator 提供 API Key 认证缓存失效能力
+func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthCacheInvalidator {
+	return apiKeyService
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	NewUserService,
 	NewAPIKeyService,
+	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
 	NewAccountService,
 	NewProxyService,
@@ -105,10 +202,16 @@ var ProviderSet = wire.NewSet(
 	NewGeminiMessagesCompatService,
 	NewAntigravityTokenProvider,
 	NewAntigravityGatewayService,
-	NewRateLimitService,
+	ProvideRateLimitService,
 	NewAccountUsageService,
 	NewAccountTestService,
 	NewSettingService,
+	NewOpsService,
+	ProvideOpsMetricsCollector,
+	ProvideOpsAggregationService,
+	ProvideOpsAlertEvaluatorService,
+	ProvideOpsCleanupService,
+	ProvideOpsScheduledReportService,
 	NewEmailService,
 	ProvideEmailQueueService,
 	NewTurnstileService,
@@ -120,6 +223,7 @@ var ProviderSet = wire.NewSet(
 	ProvideTokenRefreshService,
 	ProvideAccountExpiryService,
 	ProvideTimingWheelService,
+	ProvideDashboardAggregationService,
 	ProvideDeferredService,
 	NewAntigravityQuotaFetcher,
 	NewUserAttributeService,
