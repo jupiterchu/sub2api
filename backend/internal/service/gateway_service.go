@@ -1666,6 +1666,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
+			// 账号/组织被禁用：无条件标记账号错误并触发 failover
+			disabledMsg := strings.ToLower(extractUpstreamErrorMessage(respBody))
+			if strings.Contains(disabledMsg, "has been disabled") {
+				_ = s.accountRepo.SetError(ctx, account.ID, "Organization disabled (400): "+disabledMsg)
+				log.Printf("Account %d: organization disabled, marked as error and switching", account.ID)
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+			}
+
 			if s.shouldFailoverOn400(respBody) {
 				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
