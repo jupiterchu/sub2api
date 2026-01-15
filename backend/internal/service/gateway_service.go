@@ -2189,20 +2189,30 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	statusCode := resp.StatusCode
 
-	// OAuth/Setup Token 账号的 403：检查是否是偶发的 Permission denied 错误
-	if account.IsOAuth() && statusCode == 403 {
-		// 检查错误消息是否包含 "Permission denied"
+	// Claude OAuth 账号的 400：检查是否是账号被封禁
+	if account.IsOAuth() && account.Platform == PlatformAnthropic && statusCode == 400 {
+		upstreamMsg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+		if strings.Contains(upstreamMsg, "has been disabled") {
+			// 账号被封禁：永久标记为错误状态
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+			log.Printf("Account %d: Claude OAuth 400 with 'has been disabled', marked as permanently disabled", account.ID)
+			return
+		}
+	}
+
+	// Claude OAuth 账号的 403：检查是否是偶发的 Permission denied 错误
+	if account.IsOAuth() && account.Platform == PlatformAnthropic && statusCode == 403 {
 		upstreamMsg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 		if strings.Contains(upstreamMsg, "permission denied") {
 			// 偶发的 Permission denied：只 failover，不标记账号错误
-			log.Printf("Account %d: OAuth 403 with 'Permission denied' after %d retries, failover without marking error", account.ID, maxRetryAttempts)
+			log.Printf("Account %d: Claude OAuth 403 with 'Permission denied' after %d retries, failover without marking error", account.ID, maxRetryAttempts)
 			return
 		}
 		// 其他 403 错误：标记账号异常
 		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
 		log.Printf("Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
 	} else {
-		// API Key 未配置错误码：不标记账号状态
+		// 其他账号类型：不标记账号状态
 		log.Printf("Account %d: upstream error %d after %d retries (not marking account)", account.ID, statusCode, maxRetryAttempts)
 	}
 }
@@ -2210,12 +2220,23 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 func (s *GatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 
-	// OAuth 账号的 403：检查是否是偶发的 Permission denied 错误
-	if account.IsOAuth() && resp.StatusCode == 403 {
+	// Claude OAuth 账号的 400：检查是否是账号被封禁
+	if account.IsOAuth() && account.Platform == PlatformAnthropic && resp.StatusCode == 400 {
+		upstreamMsg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+		if strings.Contains(upstreamMsg, "has been disabled") {
+			// 账号被封禁：永久标记为错误状态
+			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+			log.Printf("Account %d: Claude OAuth 400 with 'has been disabled' failover, marked as permanently disabled", account.ID)
+			return
+		}
+	}
+
+	// Claude OAuth 账号的 403：检查是否是偶发的 Permission denied 错误
+	if account.IsOAuth() && account.Platform == PlatformAnthropic && resp.StatusCode == 403 {
 		upstreamMsg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 		if strings.Contains(upstreamMsg, "permission denied") {
 			// 偶发的 Permission denied：只 failover，不标记账号错误
-			log.Printf("Account %d: OAuth 403 with 'Permission denied' failover, not marking error", account.ID)
+			log.Printf("Account %d: Claude OAuth 403 with 'Permission denied' failover, not marking error", account.ID)
 			return
 		}
 	}
