@@ -188,6 +188,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, failedAccountIDs)
 			if err != nil {
 				if len(failedAccountIDs) == 0 {
+					if errors.Is(err, service.ErrClaudeCodeOnly) {
+						h.handleStreamingAwareError(c, http.StatusForbidden, "api_error",
+							"This credential is only authorized for use with Claude Code and cannot be used for other API requests.", streamStarted)
+						return
+					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return
 				}
@@ -323,6 +328,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, failedAccountIDs)
 		if err != nil {
 			if len(failedAccountIDs) == 0 {
+				if errors.Is(err, service.ErrClaudeCodeOnly) {
+					h.handleStreamingAwareError(c, http.StatusForbidden, "api_error",
+						"This credential is only authorized for use with Claude Code and cannot be used for other API requests.", streamStarted)
+					return
+				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 				return
 			}
@@ -740,6 +750,11 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 选择支持该模型的账号
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
 	if err != nil {
+		if errors.Is(err, service.ErrClaudeCodeOnly) {
+			h.errorResponse(c, http.StatusForbidden, "api_error",
+				"This credential is only authorized for use with Claude Code and cannot be used for other API requests.")
+			return
+		}
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
 		return
 	}
