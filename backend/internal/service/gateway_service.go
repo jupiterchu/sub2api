@@ -2531,18 +2531,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-			msg := strings.ToLower(extractUpstreamErrorMessage(respBody))
-
-			// 账号/组织被禁用：无条件触发 failover 并标记账号错误
-			if strings.Contains(msg, "has been disabled") {
-				if err := s.accountRepo.SetError(ctx, account.ID, "Organization disabled (400): "+msg); err != nil {
-					log.Printf("Account %d: failed to set error status: %v", account.ID, err)
-				} else {
-					log.Printf("Account %d: organization disabled, marked as error and switching", account.ID)
-				}
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
-			}
-
 			// 可选：对部分 400 触发 failover（需开启配置）
 			if s.cfg != nil && s.cfg.Gateway.FailoverOn400 && s.shouldFailoverOn400(respBody) {
 				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
