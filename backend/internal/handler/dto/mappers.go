@@ -73,25 +73,27 @@ func GroupFromServiceShallow(g *service.Group) *Group {
 		return nil
 	}
 	return &Group{
-		ID:               g.ID,
-		Name:             g.Name,
-		Description:      g.Description,
-		Platform:         g.Platform,
-		RateMultiplier:   g.RateMultiplier,
-		IsExclusive:      g.IsExclusive,
-		Status:           g.Status,
-		SubscriptionType: g.SubscriptionType,
-		DailyLimitUSD:    g.DailyLimitUSD,
-		WeeklyLimitUSD:   g.WeeklyLimitUSD,
-		MonthlyLimitUSD:  g.MonthlyLimitUSD,
-		ImagePrice1K:     g.ImagePrice1K,
-		ImagePrice2K:     g.ImagePrice2K,
-		ImagePrice4K:     g.ImagePrice4K,
-		ClaudeCodeOnly:   g.ClaudeCodeOnly,
-		FallbackGroupID:  g.FallbackGroupID,
-		CreatedAt:        g.CreatedAt,
-		UpdatedAt:        g.UpdatedAt,
-		AccountCount:     g.AccountCount,
+		ID:                  g.ID,
+		Name:                g.Name,
+		Description:         g.Description,
+		Platform:            g.Platform,
+		RateMultiplier:      g.RateMultiplier,
+		IsExclusive:         g.IsExclusive,
+		Status:              g.Status,
+		SubscriptionType:    g.SubscriptionType,
+		DailyLimitUSD:       g.DailyLimitUSD,
+		WeeklyLimitUSD:      g.WeeklyLimitUSD,
+		MonthlyLimitUSD:     g.MonthlyLimitUSD,
+		ImagePrice1K:        g.ImagePrice1K,
+		ImagePrice2K:        g.ImagePrice2K,
+		ImagePrice4K:        g.ImagePrice4K,
+		ClaudeCodeOnly:      g.ClaudeCodeOnly,
+		FallbackGroupID:     g.FallbackGroupID,
+		ModelRouting:        g.ModelRouting,
+		ModelRoutingEnabled: g.ModelRoutingEnabled,
+		CreatedAt:           g.CreatedAt,
+		UpdatedAt:           g.UpdatedAt,
+		AccountCount:        g.AccountCount,
 	}
 }
 
@@ -114,7 +116,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	if a == nil {
 		return nil
 	}
-	return &Account{
+	out := &Account{
 		ID:                      a.ID,
 		Name:                    a.Name,
 		Notes:                   a.Notes,
@@ -144,6 +146,34 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		SessionWindowStatus:     a.SessionWindowStatus,
 		GroupIDs:                a.GroupIDs,
 	}
+
+	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
+	if a.IsAnthropicOAuthOrSetupToken() {
+		if limit := a.GetWindowCostLimit(); limit > 0 {
+			out.WindowCostLimit = &limit
+		}
+		if reserve := a.GetWindowCostStickyReserve(); reserve > 0 {
+			out.WindowCostStickyReserve = &reserve
+		}
+		if maxSessions := a.GetMaxSessions(); maxSessions > 0 {
+			out.MaxSessions = &maxSessions
+		}
+		if idleTimeout := a.GetSessionIdleTimeoutMinutes(); idleTimeout > 0 {
+			out.SessionIdleTimeoutMin = &idleTimeout
+		}
+		// TLS指纹伪装开关
+		if a.IsTLSFingerprintEnabled() {
+			enabled := true
+			out.EnableTLSFingerprint = &enabled
+		}
+		// 会话ID伪装开关
+		if a.IsSessionIDMaskingEnabled() {
+			enabled := true
+			out.EnableSessionIDMasking = &enabled
+		}
+	}
+
+	return out
 }
 
 func AccountFromService(a *service.Account) *Account {
@@ -336,6 +366,36 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *UsageLog {
 		return nil
 	}
 	return usageLogFromServiceBase(l, AccountSummaryFromService(l.Account), true)
+}
+
+func UsageCleanupTaskFromService(task *service.UsageCleanupTask) *UsageCleanupTask {
+	if task == nil {
+		return nil
+	}
+	return &UsageCleanupTask{
+		ID:     task.ID,
+		Status: task.Status,
+		Filters: UsageCleanupFilters{
+			StartTime:   task.Filters.StartTime,
+			EndTime:     task.Filters.EndTime,
+			UserID:      task.Filters.UserID,
+			APIKeyID:    task.Filters.APIKeyID,
+			AccountID:   task.Filters.AccountID,
+			GroupID:     task.Filters.GroupID,
+			Model:       task.Filters.Model,
+			Stream:      task.Filters.Stream,
+			BillingType: task.Filters.BillingType,
+		},
+		CreatedBy:    task.CreatedBy,
+		DeletedRows:  task.DeletedRows,
+		ErrorMessage: task.ErrorMsg,
+		CanceledBy:   task.CanceledBy,
+		CanceledAt:   task.CanceledAt,
+		StartedAt:    task.StartedAt,
+		FinishedAt:   task.FinishedAt,
+		CreatedAt:    task.CreatedAt,
+		UpdatedAt:    task.UpdatedAt,
+	}
 }
 
 func SettingFromService(s *service.Setting) *Setting {

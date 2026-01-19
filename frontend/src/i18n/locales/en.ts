@@ -163,6 +163,7 @@ export default {
     notAvailable: 'N/A',
     now: 'Now',
     unknown: 'Unknown',
+    minutes: 'min',
     time: {
       never: 'Never',
       justNow: 'Just now',
@@ -195,7 +196,8 @@ export default {
     expand: 'Expand',
     logout: 'Logout',
     github: 'GitHub',
-    mySubscriptions: 'My Subscriptions'
+    mySubscriptions: 'My Subscriptions',
+    docs: 'Docs'
   },
 
   // Auth
@@ -571,7 +573,10 @@ export default {
     previous: 'Previous',
     next: 'Next',
     perPage: 'Per page',
-    goToPage: 'Go to page {page}'
+    goToPage: 'Go to page {page}',
+    jumpTo: 'Jump to',
+    jumpPlaceholder: 'Page',
+    jumpAction: 'Go'
   },
 
   // Errors
@@ -672,6 +677,7 @@ export default {
       updating: 'Updating...',
       columns: {
         user: 'User',
+        email: 'Email',
         username: 'Username',
         notes: 'Notes',
         role: 'Role',
@@ -916,6 +922,26 @@ export default {
         fallbackGroup: 'Fallback Group',
         fallbackHint: 'Non-Claude Code requests will use this group. Leave empty to reject directly.',
         noFallback: 'No Fallback (Reject)'
+      },
+      modelRouting: {
+        title: 'Model Routing',
+        tooltip: 'Configure specific model requests to be routed to designated accounts. Supports wildcard matching, e.g., claude-opus-* matches all opus models.',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        disabledHint: 'Routing rules will only take effect when enabled',
+        addRule: 'Add Routing Rule',
+        modelPattern: 'Model Pattern',
+        modelPatternPlaceholder: 'claude-opus-*',
+        modelPatternHint: 'Supports * wildcard, e.g., claude-opus-* matches all opus models',
+        accounts: 'Priority Accounts',
+        selectAccounts: 'Select accounts',
+        noAccounts: 'No accounts in this group',
+        loadingAccounts: 'Loading accounts...',
+        removeRule: 'Remove Rule',
+        noRules: 'No routing rules',
+        noRulesHint: 'Add routing rules to route specific model requests to designated accounts',
+        searchAccountPlaceholder: 'Search accounts...',
+        accountsHint: 'Select accounts to prioritize for this model pattern'
       }
     },
 
@@ -1062,7 +1088,7 @@ export default {
         platformType: 'Platform/Type',
         platform: 'Platform',
         type: 'Type',
-        concurrencyStatus: 'Concurrency',
+        capacity: 'Capacity',
         notes: 'Notes',
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
@@ -1072,9 +1098,22 @@ export default {
         todayStats: 'Today Stats',
         groups: 'Groups',
         usageWindows: 'Usage Windows',
+        proxy: 'Proxy',
         lastUsed: 'Last Used',
         expiresAt: 'Expires At',
         actions: 'Actions'
+      },
+      // Capacity status tooltips
+      capacity: {
+        windowCost: {
+          blocked: '5h window cost exceeded, account scheduling paused',
+          stickyOnly: '5h window cost at threshold, only sticky sessions allowed',
+          normal: '5h window cost normal'
+        },
+        sessions: {
+          full: 'Active sessions full, new sessions must wait (idle timeout: {idle} min)',
+          normal: 'Active sessions normal (idle timeout: {idle} min)'
+        }
       },
       tempUnschedulable: {
         title: 'Temp Unschedulable',
@@ -1227,6 +1266,39 @@ export default {
         'When enabled, warmup requests like title generation will return mock responses without consuming upstream tokens',
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
+      // Quota control (Anthropic OAuth/SetupToken only)
+      quotaControl: {
+        title: 'Quota Control',
+        hint: 'Only applies to Anthropic OAuth/Setup Token accounts',
+        windowCost: {
+          label: '5h Window Cost Limit',
+          hint: 'Limit account cost usage within the 5-hour window',
+          limit: 'Cost Threshold',
+          limitPlaceholder: '50',
+          limitHint: 'Account will not participate in new scheduling after reaching threshold',
+          stickyReserve: 'Sticky Reserve',
+          stickyReservePlaceholder: '10',
+          stickyReserveHint: 'Additional reserve for sticky sessions'
+        },
+        sessionLimit: {
+          label: 'Session Count Limit',
+          hint: 'Limit the number of active concurrent sessions',
+          maxSessions: 'Max Sessions',
+          maxSessionsPlaceholder: '3',
+          maxSessionsHint: 'Maximum number of active concurrent sessions',
+          idleTimeout: 'Idle Timeout',
+          idleTimeoutPlaceholder: '5',
+          idleTimeoutHint: 'Sessions will be released after idle timeout'
+        },
+        tlsFingerprint: {
+          label: 'TLS Fingerprint Simulation',
+          hint: 'Simulate Node.js/Claude Code client TLS fingerprint'
+        },
+        sessionIdMasking: {
+          label: 'Session ID Masking',
+          hint: 'When enabled, fixes the session ID in metadata.user_id for 15 minutes, making upstream think requests come from the same session'
+        }
+      },
       expired: 'Expired',
       proxy: 'Proxy',
       noProxy: 'No Proxy',
@@ -1873,7 +1945,43 @@ export default {
       cacheCreationTokens: 'Cache Creation Tokens',
       cacheReadTokens: 'Cache Read Tokens',
       failedToLoad: 'Failed to load usage records',
-      ipAddress: 'IP'
+      billingType: 'Billing Type',
+      allBillingTypes: 'All Billing Types',
+      billingTypeBalance: 'Balance',
+      billingTypeSubscription: 'Subscription',
+      ipAddress: 'IP',
+      cleanup: {
+        button: 'Cleanup',
+        title: 'Cleanup Usage Records',
+        warning: 'Cleanup is irreversible and will affect historical stats.',
+        submit: 'Submit Cleanup',
+        submitting: 'Submitting...',
+        confirmTitle: 'Confirm Cleanup',
+        confirmMessage: 'Are you sure you want to submit this cleanup task? This action cannot be undone.',
+        confirmSubmit: 'Confirm Cleanup',
+        cancel: 'Cancel',
+        cancelConfirmTitle: 'Confirm Cancel',
+        cancelConfirmMessage: 'Are you sure you want to cancel this cleanup task?',
+        cancelConfirm: 'Confirm Cancel',
+        cancelSuccess: 'Cleanup task canceled',
+        cancelFailed: 'Failed to cancel cleanup task',
+        recentTasks: 'Recent Cleanup Tasks',
+        loadingTasks: 'Loading tasks...',
+        noTasks: 'No cleanup tasks yet',
+        range: 'Range',
+        deletedRows: 'Deleted',
+        missingRange: 'Please select a date range',
+        submitSuccess: 'Cleanup task created',
+        submitFailed: 'Failed to create cleanup task',
+        loadFailed: 'Failed to load cleanup tasks',
+        status: {
+          pending: 'Pending',
+          running: 'Running',
+          succeeded: 'Succeeded',
+          failed: 'Failed',
+          canceled: 'Canceled'
+        }
+      }
     },
 
     // Ops Monitoring
@@ -1925,7 +2033,7 @@ export default {
       errors: 'Errors',
       errorRate: 'error_rate:',
       upstreamRate: 'upstream_rate:',
-      latencyDuration: 'Request Duration (ms)',
+      latencyDuration: 'Request Duration',
       ttftLabel: 'TTFT (first_token_ms)',
       p50: 'p50:',
       p90: 'p90:',
@@ -2590,7 +2698,7 @@ export default {
         errors: 'Error statistics, including total errors, error rate, and upstream error rate.',
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
-        ttft: 'Time To First Token, measuring the speed of first byte return in streaming responses.',
+        ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
         health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
       },
       charts: {

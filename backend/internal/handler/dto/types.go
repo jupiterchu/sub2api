@@ -58,6 +58,10 @@ type Group struct {
 	ClaudeCodeOnly  bool   `json:"claude_code_only"`
 	FallbackGroupID *int64 `json:"fallback_group_id"`
 
+	// 模型路由配置（仅 anthropic 平台使用）
+	ModelRouting        map[string][]int64 `json:"model_routing"`
+	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -97,6 +101,25 @@ type Account struct {
 	SessionWindowStart  *time.Time `json:"session_window_start"`
 	SessionWindowEnd    *time.Time `json:"session_window_end"`
 	SessionWindowStatus string     `json:"session_window_status"`
+
+	// 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 从 extra 字段提取，方便前端显示和编辑
+	WindowCostLimit         *float64 `json:"window_cost_limit,omitempty"`
+	WindowCostStickyReserve *float64 `json:"window_cost_sticky_reserve,omitempty"`
+
+	// 会话数量控制（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 从 extra 字段提取，方便前端显示和编辑
+	MaxSessions           *int `json:"max_sessions,omitempty"`
+	SessionIdleTimeoutMin *int `json:"session_idle_timeout_minutes,omitempty"`
+
+	// TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 从 extra 字段提取，方便前端显示和编辑
+	EnableTLSFingerprint *bool `json:"enable_tls_fingerprint,omitempty"`
+
+	// 会话ID伪装（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 启用后将在15分钟内固定 metadata.user_id 中的 session ID
+	// 从 extra 字段提取，方便前端显示和编辑
+	EnableSessionIDMasking *bool `json:"session_id_masking_enabled,omitempty"`
 
 	Proxy         *Proxy         `json:"proxy,omitempty"`
 	AccountGroups []AccountGroup `json:"account_groups,omitempty"`
@@ -217,6 +240,33 @@ type UsageLog struct {
 	Account      *AccountSummary   `json:"account,omitempty"` // Use minimal AccountSummary to prevent data leakage
 	Group        *Group            `json:"group,omitempty"`
 	Subscription *UserSubscription `json:"subscription,omitempty"`
+}
+
+type UsageCleanupFilters struct {
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	UserID      *int64    `json:"user_id,omitempty"`
+	APIKeyID    *int64    `json:"api_key_id,omitempty"`
+	AccountID   *int64    `json:"account_id,omitempty"`
+	GroupID     *int64    `json:"group_id,omitempty"`
+	Model       *string   `json:"model,omitempty"`
+	Stream      *bool     `json:"stream,omitempty"`
+	BillingType *int8     `json:"billing_type,omitempty"`
+}
+
+type UsageCleanupTask struct {
+	ID           int64               `json:"id"`
+	Status       string              `json:"status"`
+	Filters      UsageCleanupFilters `json:"filters"`
+	CreatedBy    int64               `json:"created_by"`
+	DeletedRows  int64               `json:"deleted_rows"`
+	ErrorMessage *string             `json:"error_message,omitempty"`
+	CanceledBy   *int64              `json:"canceled_by,omitempty"`
+	CanceledAt   *time.Time          `json:"canceled_at,omitempty"`
+	StartedAt    *time.Time          `json:"started_at,omitempty"`
+	FinishedAt   *time.Time          `json:"finished_at,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
 }
 
 // AccountSummary is a minimal account info for usage log display.
