@@ -3,6 +3,7 @@ package service
 type SystemSettings struct {
 	RegistrationEnabled bool
 	EmailVerifyEnabled  bool
+	PromoCodeEnabled    bool
 
 	SMTPHost               string
 	SMTPPort               int
@@ -25,13 +26,14 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool
 	LinuxDoConnectRedirectURL            string
 
-	SiteName     string
-	SiteLogo     string
-	SiteSubtitle string
-	APIBaseURL   string
-	ContactInfo  string
-	DocURL       string
-	HomeContent  string
+	SiteName            string
+	SiteLogo            string
+	SiteSubtitle        string
+	APIBaseURL          string
+	ContactInfo         string
+	DocURL              string
+	HomeContent         string
+	HideCcsImportButton bool
 
 	DefaultConcurrency int
 	DefaultBalance     float64
@@ -57,6 +59,7 @@ type SystemSettings struct {
 type PublicSettings struct {
 	RegistrationEnabled bool
 	EmailVerifyEnabled  bool
+	PromoCodeEnabled    bool
 	TurnstileEnabled    bool
 	TurnstileSiteKey    string
 	SiteName            string
@@ -66,6 +69,7 @@ type PublicSettings struct {
 	ContactInfo         string
 	DocURL              string
 	HomeContent         string
+	HideCcsImportButton bool
 	LinuxDoOAuthEnabled bool
 	Version             string
 }

@@ -34,6 +34,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 	response.Success(c, dto.PublicSettings{
 		RegistrationEnabled: settings.RegistrationEnabled,
 		EmailVerifyEnabled:  settings.EmailVerifyEnabled,
+		PromoCodeEnabled:    settings.PromoCodeEnabled,
 		TurnstileEnabled:    settings.TurnstileEnabled,
 		TurnstileSiteKey:    settings.TurnstileSiteKey,
 		SiteName:            settings.SiteName,
@@ -43,6 +44,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		ContactInfo:         settings.ContactInfo,
 		DocURL:              settings.DocURL,
 		HomeContent:         settings.HomeContent,
+		HideCcsImportButton: settings.HideCcsImportButton,
 		LinuxDoOAuthEnabled: settings.LinuxDoOAuthEnabled,
 		Version:             h.version,
 	})

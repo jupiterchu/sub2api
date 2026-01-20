@@ -60,6 +60,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	keys := []string{
 		SettingKeyRegistrationEnabled,
 		SettingKeyEmailVerifyEnabled,
+		SettingKeyPromoCodeEnabled,
 		SettingKeyTurnstileEnabled,
 		SettingKeyTurnstileSiteKey,
 		SettingKeySiteName,
@@ -69,6 +70,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
+		SettingKeyHideCcsImportButton,
 		SettingKeyLinuxDoConnectEnabled,
 	}
 
@@ -87,6 +89,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	return &PublicSettings{
 		RegistrationEnabled: settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:  settings[SettingKeyEmailVerifyEnabled] == "true",
+		PromoCodeEnabled:    settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
 		TurnstileEnabled:    settings[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSiteKey:    settings[SettingKeyTurnstileSiteKey],
 		SiteName:            s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
@@ -96,6 +99,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		ContactInfo:         settings[SettingKeyContactInfo],
 		DocURL:              settings[SettingKeyDocURL],
 		HomeContent:         settings[SettingKeyHomeContent],
+		HideCcsImportButton: settings[SettingKeyHideCcsImportButton] == "true",
 		LinuxDoOAuthEnabled: linuxDoEnabled,
 	}, nil
 }
@@ -123,6 +127,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 	return &struct {
 		RegistrationEnabled bool   `json:"registration_enabled"`
 		EmailVerifyEnabled  bool   `json:"email_verify_enabled"`
+		PromoCodeEnabled    bool   `json:"promo_code_enabled"`
 		TurnstileEnabled    bool   `json:"turnstile_enabled"`
 		TurnstileSiteKey    string `json:"turnstile_site_key,omitempty"`
 		SiteName            string `json:"site_name"`
@@ -132,11 +137,13 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ContactInfo         string `json:"contact_info,omitempty"`
 		DocURL              string `json:"doc_url,omitempty"`
 		HomeContent         string `json:"home_content,omitempty"`
+		HideCcsImportButton bool   `json:"hide_ccs_import_button"`
 		LinuxDoOAuthEnabled bool   `json:"linuxdo_oauth_enabled"`
 		Version             string `json:"version,omitempty"`
 	}{
 		RegistrationEnabled: settings.RegistrationEnabled,
 		EmailVerifyEnabled:  settings.EmailVerifyEnabled,
+		PromoCodeEnabled:    settings.PromoCodeEnabled,
 		TurnstileEnabled:    settings.TurnstileEnabled,
 		TurnstileSiteKey:    settings.TurnstileSiteKey,
 		SiteName:            settings.SiteName,
@@ -146,6 +153,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ContactInfo:         settings.ContactInfo,
 		DocURL:              settings.DocURL,
 		HomeContent:         settings.HomeContent,
+		HideCcsImportButton: settings.HideCcsImportButton,
 		LinuxDoOAuthEnabled: settings.LinuxDoOAuthEnabled,
 		Version:             s.version,
 	}, nil
@@ -158,6 +166,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	// 注册设置
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
+	updates[SettingKeyPromoCodeEnabled] = strconv.FormatBool(settings.PromoCodeEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
 	updates[SettingKeySMTPHost] = settings.SMTPHost
@@ -193,6 +202,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyContactInfo] = settings.ContactInfo
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
+	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 
 	// 默认配置
 	updates[SettingKeyDefaultConcurrency] = strconv.Itoa(settings.DefaultConcurrency)
@@ -241,6 +251,15 @@ func (s *SettingService) IsEmailVerifyEnabled(ctx context.Context) bool {
 		return false
 	}
 	return value == "true"
+}
+
+// IsPromoCodeEnabled 检查是否启用优惠码功能
+func (s *SettingService) IsPromoCodeEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyPromoCodeEnabled)
+	if err != nil {
+		return true // 默认启用
+	}
+	return value != "false"
 }
 
 // GetSiteName 获取网站名称
@@ -292,6 +311,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	defaults := map[string]string{
 		SettingKeyRegistrationEnabled: "true",
 		SettingKeyEmailVerifyEnabled:  "false",
+		SettingKeyPromoCodeEnabled:    "true", // 默认启用优惠码功能
 		SettingKeySiteName:            "Sub2API",
 		SettingKeySiteLogo:            "",
 		SettingKeyDefaultConcurrency:  strconv.Itoa(s.cfg.Default.UserConcurrency),
@@ -323,6 +343,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result := &SystemSettings{
 		RegistrationEnabled:          settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:           settings[SettingKeyEmailVerifyEnabled] == "true",
+		PromoCodeEnabled:             settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
 		SMTPHost:                     settings[SettingKeySMTPHost],
 		SMTPUsername:                 settings[SettingKeySMTPUsername],
 		SMTPFrom:                     settings[SettingKeySMTPFrom],
@@ -339,6 +360,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		ContactInfo:                  settings[SettingKeyContactInfo],
 		DocURL:                       settings[SettingKeyDocURL],
 		HomeContent:                  settings[SettingKeyHomeContent],
+		HideCcsImportButton:          settings[SettingKeyHideCcsImportButton] == "true",
 	}
 
 	// 解析整数类型
