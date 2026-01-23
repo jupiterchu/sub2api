@@ -166,7 +166,13 @@ export default {
       justNow: '刚刚',
       minutesAgo: '{n}分钟前',
       hoursAgo: '{n}小时前',
-      daysAgo: '{n}天前'
+      daysAgo: '{n}天前',
+      countdown: {
+        daysHours: '{d}d {h}h',
+        hoursMinutes: '{h}h {m}m',
+        minutes: '{m}m',
+        withSuffix: '{time} 后解除'
+      }
     }
   },
 
@@ -1096,6 +1102,13 @@ export default {
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',
+      autoRefresh: '自动刷新',
+      enableAutoRefresh: '启用自动刷新',
+      refreshInterval5s: '5 秒',
+      refreshInterval10s: '10 秒',
+      refreshInterval15s: '15 秒',
+      refreshInterval30s: '30 秒',
+      autoRefreshCountdown: '自动刷新：{seconds}s',
       syncFromCrs: '从 CRS 同步',
       syncFromCrsTitle: '从 CRS 同步账号',
       syncFromCrsDesc:
@@ -1205,6 +1218,8 @@ export default {
         cooldown: '冷却中',
         paused: '暂停',
         limited: '限流',
+        rateLimited: '限流中',
+        overloaded: '过载中',
         tempUnschedulable: '临时不可调度',
         rateLimitedUntil: '限流中，重置时间：{time}',
         overloadedUntil: '负载过重，重置时间：{time}',
