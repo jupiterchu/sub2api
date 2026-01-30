@@ -329,6 +329,14 @@ func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount flo
 	return nil
 }
 
+func (r *userRepository) SetBalance(ctx context.Context, id int64, balance float64) error {
+	client := clientFromContext(ctx, r.client)
+	if _, err := client.User.UpdateOneID(id).SetBalance(balance).Save(ctx); err != nil {
+		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	return nil
+}
+
 // DeductBalance 扣除用户余额
 // 透支策略：允许余额变为负数，确保当前请求能够完成
 // 中间件会阻止余额 <= 0 的用户发起后续请求

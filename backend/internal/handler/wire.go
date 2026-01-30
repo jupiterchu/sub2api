@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -58,6 +59,50 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return NewSettingHandler(settingService, buildInfo.Version)
 }
 
+// ProvideGatewayHandler wires the optional usage hook before constructing GatewayHandler.
+func ProvideGatewayHandler(
+	gatewayService *service.GatewayService,
+	usageHook service.UsageRecordedHook,
+	geminiCompatService *service.GeminiMessagesCompatService,
+	antigravityGatewayService *service.AntigravityGatewayService,
+	userService *service.UserService,
+	concurrencyService *service.ConcurrencyService,
+	billingCacheService *service.BillingCacheService,
+	cfg *config.Config,
+) *GatewayHandler {
+	if usageHook != nil {
+		gatewayService.SetUsageRecordedHook(usageHook)
+	}
+	return NewGatewayHandler(
+		gatewayService,
+		geminiCompatService,
+		antigravityGatewayService,
+		userService,
+		concurrencyService,
+		billingCacheService,
+		cfg,
+	)
+}
+
+// ProvideOpenAIGatewayHandler wires the optional usage hook before constructing OpenAIGatewayHandler.
+func ProvideOpenAIGatewayHandler(
+	gatewayService *service.OpenAIGatewayService,
+	usageHook service.UsageRecordedHook,
+	concurrencyService *service.ConcurrencyService,
+	billingCacheService *service.BillingCacheService,
+	cfg *config.Config,
+) *OpenAIGatewayHandler {
+	if usageHook != nil {
+		gatewayService.SetUsageRecordedHook(usageHook)
+	}
+	return NewOpenAIGatewayHandler(
+		gatewayService,
+		concurrencyService,
+		billingCacheService,
+		cfg,
+	)
+}
+
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
 	authHandler *AuthHandler,
@@ -94,8 +139,8 @@ var ProviderSet = wire.NewSet(
 	NewUsageHandler,
 	NewRedeemHandler,
 	NewSubscriptionHandler,
-	NewGatewayHandler,
-	NewOpenAIGatewayHandler,
+	ProvideGatewayHandler,
+	ProvideOpenAIGatewayHandler,
 	ProvideSettingHandler,
 
 	// Admin handlers

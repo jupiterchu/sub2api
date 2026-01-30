@@ -95,6 +95,8 @@ type OpenAIGatewayService struct {
 	deferredService     *DeferredService
 	openAITokenProvider *OpenAITokenProvider
 	toolCorrector       *CodexToolCorrector
+	// [NextJS] 用量记录后的回调钩子（可选）
+	usageRecordedHook UsageRecordedHook
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -131,6 +133,11 @@ func NewOpenAIGatewayService(
 		openAITokenProvider: openAITokenProvider,
 		toolCorrector:       NewCodexToolCorrector(),
 	}
+}
+
+// SetUsageRecordedHook 设置可选的用量记录钩子。
+func (s *OpenAIGatewayService) SetUsageRecordedHook(hook UsageRecordedHook) {
+	s.usageRecordedHook = hook
 }
 
 // GenerateSessionHash generates a sticky-session hash for OpenAI requests.
@@ -1645,22 +1652,44 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	shouldBill := inserted || err != nil
+	billingSucceeded := false
 
 	// Deduct based on billing type
 	if isSubscriptionBilling {
 		if shouldBill && cost.TotalCost > 0 {
-			_ = s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost)
-			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
+			if err := s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost); err != nil {
+				log.Printf("Increment subscription usage failed: %v", err)
+			} else {
+				billingSucceeded = true
+				s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
+			}
 		}
 	} else {
 		if shouldBill && cost.ActualCost > 0 {
-			_ = s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost)
-			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
+			if err := s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost); err != nil {
+				log.Printf("Deduct balance failed: %v", err)
+			} else {
+				billingSucceeded = true
+				s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
+			}
 		}
 	}
 
 	// Schedule batch update for account last_used_at
 	s.deferredService.ScheduleLastUsedUpdate(account.ID)
+
+	// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
+	if billingSucceeded && s.usageRecordedHook != nil {
+		go s.usageRecordedHook.OnUsageRecorded(
+			apiKey,
+			result.Model,
+			result.Usage.InputTokens,
+			result.Usage.OutputTokens,
+			result.Usage.CacheReadInputTokens,
+			result.Usage.CacheCreationInputTokens,
+			cost.ActualCost,
+		)
+	}
 
 	return nil
 }

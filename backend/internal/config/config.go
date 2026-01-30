@@ -62,6 +62,7 @@ type Config struct {
 	Timezone     string                     `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini       GeminiConfig               `mapstructure:"gemini"`
 	Update       UpdateConfig               `mapstructure:"update"`
+	NextJS       NextJSConfig               `mapstructure:"nextjs"` // NextJS BFF 集成配置
 }
 
 type GeminiConfig struct {
@@ -91,6 +92,25 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+}
+
+// NextJSConfig 为 NextJS BFF 集成配置。
+// 用于与 NextJS + Supabase 系统通信。
+type NextJSConfig struct {
+	// Enabled 是否启用 NextJS 集成
+	Enabled bool `mapstructure:"enabled"`
+	// BaseURL NextJS 服务的基础 URL
+	BaseURL string `mapstructure:"base_url"`
+	// InternalSecret 内部通信密钥（X-Internal-Secret 请求头）
+	InternalSecret string `mapstructure:"internal_secret"`
+	// TimeoutSeconds 请求超时时间（秒）
+	TimeoutSeconds int `mapstructure:"timeout_seconds"`
+	// RetryCount 重试次数
+	RetryCount int `mapstructure:"retry_count"`
+	// RetryDelaySeconds 重试延迟（秒）
+	RetryDelaySeconds int `mapstructure:"retry_delay_seconds"`
+	// PointsToUSD 积分转换比例（1 USD = N 积分，默认 10000）
+	PointsToUSD int `mapstructure:"points_to_usd"`
 }
 
 type LinuxDoConnectConfig struct {
@@ -869,6 +889,18 @@ func setDefaults() {
 	viper.SetDefault("gemini.oauth.client_secret", "")
 	viper.SetDefault("gemini.oauth.scopes", "")
 	viper.SetDefault("gemini.quota.policy", "")
+
+	// Update (online update)
+	viper.SetDefault("update.proxy_url", "")
+
+	// NextJS BFF 集成（默认关闭）
+	viper.SetDefault("nextjs.enabled", false)
+	viper.SetDefault("nextjs.base_url", "http://localhost:3000")
+	viper.SetDefault("nextjs.internal_secret", "")
+	viper.SetDefault("nextjs.timeout_seconds", 10)
+	viper.SetDefault("nextjs.retry_count", 2)
+	viper.SetDefault("nextjs.retry_delay_seconds", 1)
+	viper.SetDefault("nextjs.points_to_usd", 10000)
 }
 
 func (c *Config) Validate() error {
@@ -938,6 +970,21 @@ func (c *Config) Validate() error {
 		warnIfInsecureURL("linuxdo_connect.userinfo_url", c.LinuxDo.UserInfoURL)
 		warnIfInsecureURL("linuxdo_connect.redirect_url", c.LinuxDo.RedirectURL)
 		warnIfInsecureURL("linuxdo_connect.frontend_redirect_url", c.LinuxDo.FrontendRedirectURL)
+	}
+	if c.NextJS.Enabled {
+		if strings.TrimSpace(c.NextJS.BaseURL) == "" {
+			return fmt.Errorf("nextjs.base_url is required when nextjs.enabled=true")
+		}
+		if err := ValidateAbsoluteHTTPURL(c.NextJS.BaseURL); err != nil {
+			return fmt.Errorf("nextjs.base_url invalid: %w", err)
+		}
+		if strings.TrimSpace(c.NextJS.InternalSecret) == "" {
+			return fmt.Errorf("nextjs.internal_secret is required when nextjs.enabled=true")
+		}
+		if c.NextJS.PointsToUSD <= 0 {
+			return fmt.Errorf("nextjs.points_to_usd must be positive")
+		}
+		warnIfInsecureURL("nextjs.base_url", c.NextJS.BaseURL)
 	}
 	if c.Billing.CircuitBreaker.Enabled {
 		if c.Billing.CircuitBreaker.FailureThreshold <= 0 {

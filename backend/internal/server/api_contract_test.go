@@ -739,6 +739,15 @@ func (r *stubUserRepo) UpdateBalance(ctx context.Context, id int64, amount float
 	return errors.New("not implemented")
 }
 
+func (r *stubUserRepo) SetBalance(ctx context.Context, id int64, balance float64) error {
+	user, ok := r.users[id]
+	if !ok {
+		return service.ErrUserNotFound
+	}
+	user.Balance = balance
+	return nil
+}
+
 func (r *stubUserRepo) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	return errors.New("not implemented")
 }

@@ -74,6 +74,14 @@ func (s *userRepoStub) UpdateBalance(ctx context.Context, id int64, amount float
 	panic("unexpected UpdateBalance call")
 }
 
+func (s *userRepoStub) SetBalance(ctx context.Context, id int64, balance float64) error {
+	if s.user == nil || s.user.ID != id {
+		return ErrUserNotFound
+	}
+	s.user.Balance = balance
+	return nil
+}
+
 func (s *userRepoStub) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	panic("unexpected DeductBalance call")
 }
