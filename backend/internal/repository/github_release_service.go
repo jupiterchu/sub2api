@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
@@ -16,11 +17,12 @@ import (
 type githubReleaseClient struct {
 	httpClient         *http.Client
 	downloadHTTPClient *http.Client
+	token              string
 }
 
 // NewGitHubReleaseClient 创建 GitHub Release 客户端
 // proxyURL 为空时直连 GitHub，支持 http/https/socks5/socks5h 协议
-func NewGitHubReleaseClient(proxyURL string) service.GitHubReleaseClient {
+func NewGitHubReleaseClient(proxyURL, token string) service.GitHubReleaseClient {
 	sharedClient, err := httpclient.GetClient(httpclient.Options{
 		Timeout:  30 * time.Second,
 		ProxyURL: proxyURL,
@@ -41,7 +43,20 @@ func NewGitHubReleaseClient(proxyURL string) service.GitHubReleaseClient {
 	return &githubReleaseClient{
 		httpClient:         sharedClient,
 		downloadHTTPClient: downloadClient,
+		token:              strings.TrimSpace(token),
 	}
+}
+
+func (c *githubReleaseClient) applyAuth(req *http.Request) {
+	if c.token == "" {
+		return
+	}
+	lower := strings.ToLower(c.token)
+	if strings.HasPrefix(lower, "bearer ") || strings.HasPrefix(lower, "token ") {
+		req.Header.Set("Authorization", c.token)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
 }
 
 func (c *githubReleaseClient) FetchLatestRelease(ctx context.Context, repo string) (*service.GitHubRelease, error) {
@@ -53,6 +68,7 @@ func (c *githubReleaseClient) FetchLatestRelease(ctx context.Context, repo strin
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", "Sub2API-Updater")
+	c.applyAuth(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -77,6 +93,7 @@ func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string
 	if err != nil {
 		return err
 	}
+	c.applyAuth(req)
 
 	// 使用预配置的下载客户端（已包含代理配置）
 	resp, err := c.downloadHTTPClient.Do(req)
@@ -121,6 +138,7 @@ func (c *githubReleaseClient) FetchChecksumFile(ctx context.Context, url string)
 	if err != nil {
 		return nil, err
 	}
+	c.applyAuth(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

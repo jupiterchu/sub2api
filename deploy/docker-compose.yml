@@ -113,9 +113,13 @@ services:
       # =======================================================================
       # Update Configuration (在线更新配置)
       # =======================================================================
+      # GitHub repository for online updates (owner/repo)
+      - UPDATE_REPO=${UPDATE_REPO:-jupiterchu/sub2api}
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      # GitHub token for private repositories (optional)
+      - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

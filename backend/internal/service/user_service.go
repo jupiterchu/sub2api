@@ -34,6 +34,7 @@ type UserRepository interface {
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error)
 
 	UpdateBalance(ctx context.Context, id int64, amount float64) error
+	SetBalance(ctx context.Context, id int64, balance float64) error
 	DeductBalance(ctx context.Context, id int64, amount float64) error
 	UpdateConcurrency(ctx context.Context, id int64, amount int) error
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
@@ -174,6 +175,17 @@ func (s *UserService) List(ctx context.Context, params pagination.PaginationPara
 func (s *UserService) UpdateBalance(ctx context.Context, userID int64, amount float64) error {
 	if err := s.userRepo.UpdateBalance(ctx, userID, amount); err != nil {
 		return fmt.Errorf("update balance: %w", err)
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	}
+	return nil
+}
+
+// SetBalance 直接设置用户余额（管理员功能）
+func (s *UserService) SetBalance(ctx context.Context, userID int64, balance float64) error {
+	if err := s.userRepo.SetBalance(ctx, userID, balance); err != nil {
+		return fmt.Errorf("set balance: %w", err)
 	}
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)

@@ -214,6 +214,20 @@ type GatewayService struct {
 	concurrencyService  *ConcurrencyService
 	claudeTokenProvider *ClaudeTokenProvider
 	sessionLimitCache   SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+
+	// [NextJS] 用量记录后的回调钩子（可选）
+	usageRecordedHook UsageRecordedHook
+}
+
+// UsageRecordedHook 在用量记录后触发。
+// 可用于让外部系统（如 NextJS）接收用量数据。
+type UsageRecordedHook interface {
+	OnUsageRecorded(apiKey *APIKey, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int, cost float64)
+}
+
+// SetUsageRecordedHook 设置可选的用量记录钩子。
+func (s *GatewayService) SetUsageRecordedHook(hook UsageRecordedHook) {
+	s.usageRecordedHook = hook
 }
 
 // NewGatewayService creates a new GatewayService
@@ -3577,6 +3591,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	}
 
 	shouldBill := inserted || err != nil
+	billingSucceeded := false
 
 	// 根据计费类型执行扣费
 	if isSubscriptionBilling {
@@ -3584,23 +3599,40 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		if shouldBill && cost.TotalCost > 0 {
 			if err := s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost); err != nil {
 				log.Printf("Increment subscription usage failed: %v", err)
+			} else {
+				billingSucceeded = true
+				// 异步更新订阅缓存
+				s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 			}
-			// 异步更新订阅缓存
-			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）
 		if shouldBill && cost.ActualCost > 0 {
 			if err := s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost); err != nil {
 				log.Printf("Deduct balance failed: %v", err)
+			} else {
+				billingSucceeded = true
+				// 异步更新余额缓存
+				s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
 			}
-			// 异步更新余额缓存
-			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
 		}
 	}
 
 	// Schedule batch update for account last_used_at
 	s.deferredService.ScheduleLastUsedUpdate(account.ID)
+
+	// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
+	if billingSucceeded && s.usageRecordedHook != nil {
+		go s.usageRecordedHook.OnUsageRecorded(
+			apiKey,
+			result.Model,
+			result.Usage.InputTokens,
+			result.Usage.OutputTokens,
+			result.Usage.CacheReadInputTokens,
+			result.Usage.CacheCreationInputTokens,
+			cost.ActualCost,
+		)
+	}
 
 	return nil
 }

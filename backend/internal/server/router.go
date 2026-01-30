@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/custom"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/routes"
@@ -27,6 +28,7 @@ func SetupRouter(
 	settingService *service.SettingService,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	internalHandler *custom.InternalHandler,
 ) *gin.Engine {
 	// 应用中间件
 	r.Use(middleware2.Logger())
@@ -48,6 +50,7 @@ func SetupRouter(
 
 	// 注册路由
 	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, apiKeyService, subscriptionService, opsService, cfg, redisClient)
+	custom.RegisterInternalRoutes(r, internalHandler, cfg)
 
 	return r
 }
