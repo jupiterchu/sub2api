@@ -120,7 +120,7 @@ func (s *NextJSService) SendUsageWebhook(apiKey string, userID int64, model stri
 }
 
 // doRequestWithRetry 执行带重试的 HTTP 请求。
-func (s *NextJSService) doRequestWithRetry(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+func (s *NextJSService) doRequestWithRetry(ctx context.Context, method, path string, body any, result any) error {
 	var lastErr error
 
 	retryCount := s.cfg.NextJS.RetryCount
@@ -155,7 +155,7 @@ func (s *NextJSService) doRequestWithRetry(ctx context.Context, method, path str
 }
 
 // doRequest 执行一次 HTTP 请求。
-func (s *NextJSService) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+func (s *NextJSService) doRequest(ctx context.Context, method, path string, body any, result any) error {
 	url := s.cfg.NextJS.BaseURL + path
 
 	var reqBody io.Reader
