@@ -3035,6 +3035,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
 		errMsg = "Upstream service temporarily unavailable"
+	case 422:
+		// 422 通常是请求验证错误（如 context limit），应透传上游错误消息
+		statusCode = http.StatusUnprocessableEntity
+		errType = "invalid_request_error"
+		if upstreamMsg != "" {
+			errMsg = upstreamMsg
+		} else {
+			errMsg = "Upstream validation failed"
+		}
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
