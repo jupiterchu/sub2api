@@ -30,7 +30,7 @@ Files modified
   - Defaults + validation when nextjs.enabled = true
 - backend/internal/service/gateway_service.go
   - Adds UsageRecordedHook + SetUsageRecordedHook
-  - Triggers hook only when billing succeeds
+  - Triggers hook only when billing succeeds (in both RecordUsage and RecordUsageWithLongContext)
 - backend/internal/service/openai_gateway_service.go
   - Same as gateway_service.go
 - backend/internal/handler/wire.go
@@ -80,7 +80,7 @@ Merge checklist (for future upstream updates)
 - custom.ProviderSet included in backend/cmd/server/wire.go
 - Internal routes registered in backend/internal/server/router.go
 - UsageRecordedHook wiring in backend/internal/handler/wire.go
-- UsageRecordedHook triggers after billing success in gateway services
+- UsageRecordedHook triggers after billing success in gateway services (both RecordUsage and RecordUsageWithLongContext)
 - UserService.SetBalance + UserRepository.SetBalance still present
 - nextjs config defaults + validation in backend/internal/config/config.go
 
@@ -146,3 +146,8 @@ Design notes (intent)
 - Usage webhook is sent only after billing success, to keep NextJS and sub2api aligned.
 - apiKey is omitted in webhook payload; NextJS uses userId as the identity key.
 - Internal balance sync allows negative values; only NaN/Inf are rejected.
+
+Bug fixes
+- RecordUsageWithLongContext (used by Gemini via Antigravity mixed_scheduling) was missing the UsageRecordedHook call.
+  - Fixed: Added billingSucceeded tracking and hook invocation to match RecordUsage behavior.
+  - This ensures Gemini usage via Antigravity channel also triggers the NextJS webhook.

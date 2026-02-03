@@ -4828,6 +4828,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 
 	shouldBill := inserted || err != nil
+	billingSucceeded := false
 
 	// 根据计费类型执行扣费
 	if isSubscriptionBilling {
@@ -4835,23 +4836,40 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		if shouldBill && cost.TotalCost > 0 {
 			if err := s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost); err != nil {
 				log.Printf("Increment subscription usage failed: %v", err)
+			} else {
+				billingSucceeded = true
+				// 异步更新订阅缓存
+				s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 			}
-			// 异步更新订阅缓存
-			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）
 		if shouldBill && cost.ActualCost > 0 {
 			if err := s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost); err != nil {
 				log.Printf("Deduct balance failed: %v", err)
+			} else {
+				billingSucceeded = true
+				// 异步更新余额缓存
+				s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
 			}
-			// 异步更新余额缓存
-			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
 		}
 	}
 
 	// Schedule batch update for account last_used_at
 	s.deferredService.ScheduleLastUsedUpdate(account.ID)
+
+	// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
+	if billingSucceeded && s.usageRecordedHook != nil {
+		go s.usageRecordedHook.OnUsageRecorded(
+			apiKey,
+			result.Model,
+			result.Usage.InputTokens,
+			result.Usage.OutputTokens,
+			result.Usage.CacheReadInputTokens,
+			result.Usage.CacheCreationInputTokens,
+			cost.ActualCost,
+		)
+	}
 
 	return nil
 }
