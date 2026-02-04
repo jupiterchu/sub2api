@@ -115,6 +115,13 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			} else {
 				slog.Info("oauth_401_force_refresh_set", "account_id", account.ID, "platform", account.Platform)
 			}
+
+			// OpenAI OAuth 账号的 401 "Invalid bearer token"：只刷新 token，不标记账号错误
+			// 这是偶发性错误，token 刷新后即可正常使用
+			if account.Platform == PlatformOpenAI && strings.Contains(strings.ToLower(upstreamMsg), "invalid bearer token") {
+				slog.Info("openai_oauth_401_invalid_bearer_token_refreshed", "account_id", account.ID)
+				return shouldDisable
+			}
 		}
 		msg := "Authentication failed (401): invalid or expired credentials"
 		if upstreamMsg != "" {
