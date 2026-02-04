@@ -2541,6 +2541,11 @@ const (
 )
 
 func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode int) bool {
+	// 400、422 是用户请求问题（如 context limit），不重试，直接透传给用户
+	if statusCode == 400 || statusCode == 422 {
+		return false
+	}
+
 	// OAuth/Setup Token 账号：仅 403 重试
 	if account.IsOAuth() {
 		return statusCode == 403
@@ -3769,6 +3774,17 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
+	case 422:
+		// 422 通常是请求验证错误（如 context limit），直接透传上游响应
+		c.Data(http.StatusUnprocessableEntity, "application/json", body)
+		summary := upstreamMsg
+		if summary == "" {
+			summary = truncateForLog(body, 512)
+		}
+		if summary == "" {
+			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -3789,15 +3805,6 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
 		errMsg = "Upstream service temporarily unavailable"
-	case 422:
-		// 422 通常是请求验证错误（如 context limit），应透传上游错误消息
-		statusCode = http.StatusUnprocessableEntity
-		errType = "invalid_request_error"
-		if upstreamMsg != "" {
-			errMsg = upstreamMsg
-		} else {
-			errMsg = "Upstream validation failed"
-		}
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -3912,7 +3919,28 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		)
 	}
 
-	// 返回统一的重试耗尽错误响应
+	// 对于 4xx 客户端错误，透传上游的状态码和错误消息，而不是返回 502
+	// 因为这些通常是用户请求的问题（如 context limit），用户需要看到原始错误才能采取正确的措施
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		errType := "invalid_request_error"
+		errMsg := upstreamMsg
+		if errMsg == "" {
+			errMsg = "Upstream request failed"
+		}
+		c.JSON(resp.StatusCode, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    errType,
+				"message": errMsg,
+			},
+		})
+		if upstreamMsg == "" {
+			return nil, fmt.Errorf("upstream error: %d (retries exhausted)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d (retries exhausted) message=%s", resp.StatusCode, upstreamMsg)
+	}
+
+	// 对于 5xx 服务端错误，返回 502 Bad Gateway
 	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
