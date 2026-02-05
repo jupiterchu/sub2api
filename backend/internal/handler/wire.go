@@ -71,6 +71,7 @@ func ProvideGatewayHandler(
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	usageService *service.UsageService,
+	apiKeyService *service.APIKeyService,
 	cfg *config.Config,
 ) *GatewayHandler {
 	if usageHook != nil {
@@ -84,6 +85,7 @@ func ProvideGatewayHandler(
 		concurrencyService,
 		billingCacheService,
 		usageService,
+		apiKeyService,
 		cfg,
 	)
 }
@@ -94,6 +96,7 @@ func ProvideOpenAIGatewayHandler(
 	usageHook service.UsageRecordedHook,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
+	apiKeyService *service.APIKeyService,
 	cfg *config.Config,
 ) *OpenAIGatewayHandler {
 	if usageHook != nil {
@@ -103,6 +106,7 @@ func ProvideOpenAIGatewayHandler(
 		gatewayService,
 		concurrencyService,
 		billingCacheService,
+		apiKeyService,
 		cfg,
 	)
 }
