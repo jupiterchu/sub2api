@@ -370,7 +370,8 @@ type ForwardResult struct {
 
 // UpstreamFailoverError indicates an upstream error that should trigger account failover.
 type UpstreamFailoverError struct {
-	StatusCode int
+	StatusCode   int
+	ResponseBody []byte // 上游响应体，用于错误透传规则匹配
 }
 
 func (e *UpstreamFailoverError) Error() string {
@@ -3303,7 +3304,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					return ""
 				}(),
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account)
 	}
@@ -3333,10 +3334,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return ""
 			}(),
 		})
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 	}
-
-	// 处理错误响应（不可重试的错误）
 	if resp.StatusCode >= 400 {
 		// 对于 400 错误，检查是否需要触发 failover
 		if resp.StatusCode == 400 {
@@ -3380,7 +3379,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					log.Printf("Account %d: 400 error, attempting failover", account.ID)
 				}
 				s.handleFailoverSideEffects(ctx, resp, account)
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
 		return s.handleErrorResponse(ctx, resp, c, account)
@@ -3777,6 +3776,12 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 	return false
 }
 
+// ExtractUpstreamErrorMessage 从上游响应体中提取错误消息
+// 支持 Claude 风格的错误格式：{"type":"error","error":{"type":"...","message":"..."}}
+func ExtractUpstreamErrorMessage(body []byte) string {
+	return extractUpstreamErrorMessage(body)
+}
+
 func extractUpstreamErrorMessage(body []byte) string {
 	// Claude 风格：{"type":"error","error":{"type":"...","message":"..."}}
 	if m := gjson.GetBytes(body, "error.message").String(); strings.TrimSpace(m) != "" {
@@ -3844,7 +3849,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
 	}
 	if shouldDisable {
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}
 	}
 
 	// 记录上游错误响应体摘要便于排障（可选：由配置控制；不回显到客户端）
@@ -4240,6 +4245,20 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 
+		// 兼容 Kimi cached_tokens → cache_read_input_tokens
+		if eventType == "message_start" {
+			if msg, ok := event["message"].(map[string]any); ok {
+				if u, ok := msg["usage"].(map[string]any); ok {
+					reconcileCachedTokens(u)
+				}
+			}
+		}
+		if eventType == "message_delta" {
+			if u, ok := event["usage"].(map[string]any); ok {
+				reconcileCachedTokens(u)
+			}
+		}
+
 		if needModelReplace {
 			if msg, ok := event["message"].(map[string]any); ok {
 				if model, ok := msg["model"].(string); ok && model == mappedModel {
@@ -4588,6 +4607,17 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	// 兼容 Kimi cached_tokens → cache_read_input_tokens
+	if response.Usage.CacheReadInputTokens == 0 {
+		cachedTokens := gjson.GetBytes(body, "usage.cached_tokens").Int()
+		if cachedTokens > 0 {
+			response.Usage.CacheReadInputTokens = int(cachedTokens)
+			if newBody, err := sjson.SetBytes(body, "usage.cache_read_input_tokens", cachedTokens); err == nil {
+				body = newBody
+			}
+		}
 	}
 
 	// 如果有模型映射，替换响应中的model字段
@@ -5410,4 +5440,22 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	}
 
 	return models
+}
+
+// reconcileCachedTokens 兼容 Kimi 等上游：
+// 将 OpenAI 风格的 cached_tokens 映射到 Claude 标准的 cache_read_input_tokens
+func reconcileCachedTokens(usage map[string]any) bool {
+	if usage == nil {
+		return false
+	}
+	cacheRead, _ := usage["cache_read_input_tokens"].(float64)
+	if cacheRead > 0 {
+		return false // 已有标准字段，无需处理
+	}
+	cached, _ := usage["cached_tokens"].(float64)
+	if cached <= 0 {
+		return false
+	}
+	usage["cache_read_input_tokens"] = cached
+	return true
 }

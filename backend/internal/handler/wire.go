@@ -28,6 +28,7 @@ func ProvideAdminHandlers(
 	subscriptionHandler *admin.SubscriptionHandler,
 	usageHandler *admin.UsageHandler,
 	userAttributeHandler *admin.UserAttributeHandler,
+	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
@@ -48,6 +49,7 @@ func ProvideAdminHandlers(
 		Subscription:     subscriptionHandler,
 		Usage:            usageHandler,
 		UserAttribute:    userAttributeHandler,
+		ErrorPassthrough: errorPassthroughHandler,
 	}
 }
 
@@ -72,6 +74,7 @@ func ProvideGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	usageService *service.UsageService,
 	apiKeyService *service.APIKeyService,
+	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
 ) *GatewayHandler {
 	if usageHook != nil {
@@ -86,6 +89,7 @@ func ProvideGatewayHandler(
 		billingCacheService,
 		usageService,
 		apiKeyService,
+		errorPassthroughService,
 		cfg,
 	)
 }
@@ -97,6 +101,7 @@ func ProvideOpenAIGatewayHandler(
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
+	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
 ) *OpenAIGatewayHandler {
 	if usageHook != nil {
@@ -107,6 +112,7 @@ func ProvideOpenAIGatewayHandler(
 		concurrencyService,
 		billingCacheService,
 		apiKeyService,
+		errorPassthroughService,
 		cfg,
 	)
 }
@@ -176,6 +182,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewSubscriptionHandler,
 	admin.NewUsageHandler,
 	admin.NewUserAttributeHandler,
+	admin.NewErrorPassthroughHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,
