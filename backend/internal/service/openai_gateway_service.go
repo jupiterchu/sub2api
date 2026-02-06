@@ -1094,6 +1094,12 @@ func (s *OpenAIGatewayService) handleErrorResponse(ctx context.Context, resp *ht
 		)
 	}
 
+	// 400 是用户请求问题（如不支持的参数），直接透传上游响应给用户
+	if resp.StatusCode == 400 {
+		c.Data(http.StatusBadRequest, "application/json", body)
+		return nil, fmt.Errorf("upstream error: %d (passthrough) message=%s", resp.StatusCode, upstreamMsg)
+	}
+
 	// Check custom error codes
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
