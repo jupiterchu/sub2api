@@ -13,10 +13,13 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/google/uuid"
 )
 
 // UsageWebhookRequest 表示发送给 NextJS 的用量数据。
 type UsageWebhookRequest struct {
+	// RequestID 是每次 webhook 调用的唯一标识（UUID v4），用于接收端做幂等去重。
+	RequestID        string  `json:"requestId"`
 	Event            string  `json:"event"`
 	APIKey           string  `json:"apiKey,omitempty"`
 	UserID           int64   `json:"userId,omitempty"`
@@ -96,6 +99,7 @@ func (s *NextJSService) SendUsageWebhook(apiKey string, userID int64, model stri
 	defer cancel()
 
 	req := UsageWebhookRequest{
+		RequestID:         uuid.New().String(),
 		Event:             "usage",
 		APIKey:            apiKey,
 		UserID:            userID,
