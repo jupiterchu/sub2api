@@ -282,6 +282,34 @@ func (r *accountRepository) GetByCRSAccountID(ctx context.Context, crsAccountID 
 	return &accounts[0], nil
 }
 
+func (r *accountRepository) ListCRSAccountIDs(ctx context.Context) (map[string]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id, extra->>'crs_account_id'
+		FROM accounts
+		WHERE deleted_at IS NULL
+			AND extra->>'crs_account_id' IS NOT NULL
+			AND extra->>'crs_account_id' != ''
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]int64)
+	for rows.Next() {
+		var id int64
+		var crsID string
+		if err := rows.Scan(&id, &crsID); err != nil {
+			return nil, err
+		}
+		result[crsID] = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (r *accountRepository) Update(ctx context.Context, account *service.Account) error {
 	if account == nil {
 		return nil
@@ -407,10 +435,10 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *accountRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.ListWithFilters(ctx, params, "", "", "", "")
+	return r.ListWithFilters(ctx, params, "", "", "", "", 0)
 }
 
-func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -420,10 +448,18 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 		q = q.Where(dbaccount.TypeEQ(accountType))
 	}
 	if status != "" {
-		q = q.Where(dbaccount.StatusEQ(status))
+		switch status {
+		case "rate_limited":
+			q = q.Where(dbaccount.RateLimitResetAtGT(time.Now()))
+		default:
+			q = q.Where(dbaccount.StatusEQ(status))
+		}
 	}
 	if search != "" {
 		q = q.Where(dbaccount.NameContainsFold(search))
+	}
+	if groupID > 0 {
+		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)))
 	}
 
 	total, err := q.Count(ctx)
@@ -794,53 +830,6 @@ func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetA
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		log.Printf("[SchedulerOutbox] enqueue rate limit failed: account=%d err=%v", id, err)
-	}
-	return nil
-}
-
-func (r *accountRepository) SetAntigravityQuotaScopeLimit(ctx context.Context, id int64, scope service.AntigravityQuotaScope, resetAt time.Time) error {
-	now := time.Now().UTC()
-	payload := map[string]string{
-		"rate_limited_at":     now.Format(time.RFC3339),
-		"rate_limit_reset_at": resetAt.UTC().Format(time.RFC3339),
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	scopeKey := string(scope)
-	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(
-		ctx,
-		`UPDATE accounts SET
-			extra = jsonb_set(
-				jsonb_set(COALESCE(extra, '{}'::jsonb), '{antigravity_quota_scopes}'::text[], COALESCE(extra->'antigravity_quota_scopes', '{}'::jsonb), true),
-				ARRAY['antigravity_quota_scopes', $1]::text[],
-				$2::jsonb,
-				true
-			),
-			updated_at = NOW(),
-			last_used_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL`,
-		scopeKey,
-		raw,
-		id,
-	)
-	if err != nil {
-		return err
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return service.ErrAccountNotFound
-	}
-
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		log.Printf("[SchedulerOutbox] enqueue quota scope failed: account=%d err=%v", id, err)
 	}
 	return nil
 }
