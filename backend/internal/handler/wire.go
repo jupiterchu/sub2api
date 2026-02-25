@@ -54,8 +54,8 @@ func ProvideAdminHandlers(
 }
 
 // ProvideSystemHandler creates admin.SystemHandler with UpdateService
-func ProvideSystemHandler(updateService *service.UpdateService) *admin.SystemHandler {
-	return admin.NewSystemHandler(updateService)
+func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService) *admin.SystemHandler {
+	return admin.NewSystemHandler(updateService, lockService)
 }
 
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
@@ -74,6 +74,7 @@ func ProvideGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	usageService *service.UsageService,
 	apiKeyService *service.APIKeyService,
+	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
 ) *GatewayHandler {
@@ -89,6 +90,7 @@ func ProvideGatewayHandler(
 		billingCacheService,
 		usageService,
 		apiKeyService,
+		usageRecordWorkerPool,
 		errorPassthroughService,
 		cfg,
 	)
@@ -101,6 +103,7 @@ func ProvideOpenAIGatewayHandler(
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
+	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
 ) *OpenAIGatewayHandler {
@@ -112,6 +115,7 @@ func ProvideOpenAIGatewayHandler(
 		concurrencyService,
 		billingCacheService,
 		apiKeyService,
+		usageRecordWorkerPool,
 		errorPassthroughService,
 		cfg,
 	)
@@ -129,8 +133,11 @@ func ProvideHandlers(
 	adminHandlers *AdminHandlers,
 	gatewayHandler *GatewayHandler,
 	openaiGatewayHandler *OpenAIGatewayHandler,
+	soraGatewayHandler *SoraGatewayHandler,
 	settingHandler *SettingHandler,
 	totpHandler *TotpHandler,
+	_ *service.IdempotencyCoordinator,
+	_ *service.IdempotencyCleanupService,
 ) *Handlers {
 	return &Handlers{
 		Auth:          authHandler,
@@ -143,6 +150,7 @@ func ProvideHandlers(
 		Admin:         adminHandlers,
 		Gateway:       gatewayHandler,
 		OpenAIGateway: openaiGatewayHandler,
+		SoraGateway:   soraGatewayHandler,
 		Setting:       settingHandler,
 		Totp:          totpHandler,
 	}
@@ -160,6 +168,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementHandler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
+	NewSoraGatewayHandler,
 	NewTotpHandler,
 	ProvideSettingHandler,
 
