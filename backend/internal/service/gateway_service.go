@@ -5002,28 +5002,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		)
 	}
 
-	// 对于 4xx 客户端错误，透传上游的状态码和错误消息，而不是返回 502
-	// 因为这些通常是用户请求的问题（如 context limit），用户需要看到原始错误才能采取正确的措施
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		errType := "invalid_request_error"
-		errMsg := upstreamMsg
-		if errMsg == "" {
-			errMsg = "Upstream request failed"
-		}
-		c.JSON(resp.StatusCode, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
-		if upstreamMsg == "" {
-			return nil, fmt.Errorf("upstream error: %d (retries exhausted)", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("upstream error: %d (retries exhausted) message=%s", resp.StatusCode, upstreamMsg)
-	}
-
-	// 对于非 4xx 错误，检查错误透传规则
+	// 检查错误透传规则
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
 		account.Platform,

@@ -333,7 +333,8 @@ linters:
         - SA5010
         # Possible nil pointer dereference.
         # https://staticcheck.dev/docs/checks/#SA5011
-        - SA5011
+        # Disabled: false positives on upstream tests with t.Fatal nil guards.
+        - -SA5011
         # Passing odd-sized slice to function expecting even size.
         # https://staticcheck.dev/docs/checks/#SA5012
         - SA5012

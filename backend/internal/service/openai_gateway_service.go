@@ -1963,12 +1963,6 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		)
 	}
 
-	// 400 是用户请求问题（如不支持的参数），直接透传上游响应给用户
-	if resp.StatusCode == 400 {
-		c.Data(http.StatusBadRequest, "application/json", body)
-		return nil, fmt.Errorf("upstream error: %d (passthrough) message=%s", resp.StatusCode, upstreamMsg)
-	}
-
 	// 对于其他错误，检查错误透传规则
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
@@ -2732,6 +2726,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 				logger.LegacyPrintf("service.openai_gateway", "Deduct balance failed: %v", err)
 			} else {
 				billingSucceeded = true
+				// 异步更新余额缓存，避免后续请求短时间读取到旧余额。
+				if s.billingCacheService != nil {
+					s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
+				}
 			}
 		}
 	}
