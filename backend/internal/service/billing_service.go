@@ -84,18 +84,22 @@ func (s *BillingService) initFallbackPricing() {
 	s.fallbackPrices["claude-opus-4.5"] = &ModelPricing{
 		InputPricePerToken:         5e-6,    // $5 per MTok
 		OutputPricePerToken:        25e-6,   // $25 per MTok
-		CacheCreationPricePerToken: 6.25e-6, // $6.25 per MTok
+		CacheCreationPricePerToken: 6.25e-6, // $6.25 per MTok (5m rate as fallback)
 		CacheReadPricePerToken:     0.5e-6,  // $0.50 per MTok
-		SupportsCacheBreakdown:     false,
+		CacheCreation5mPrice:       6.25e-6, // $6.25 per MTok (1.25x base)
+		CacheCreation1hPrice:       10e-6,   // $10.00 per MTok (2x base)
+		SupportsCacheBreakdown:     true,
 	}
 
 	// Claude 4 Sonnet
 	s.fallbackPrices["claude-sonnet-4"] = &ModelPricing{
 		InputPricePerToken:         3e-6,    // $3 per MTok
 		OutputPricePerToken:        15e-6,   // $15 per MTok
-		CacheCreationPricePerToken: 3.75e-6, // $3.75 per MTok
+		CacheCreationPricePerToken: 3.75e-6, // $3.75 per MTok (5m rate as fallback)
 		CacheReadPricePerToken:     0.3e-6,  // $0.30 per MTok
-		SupportsCacheBreakdown:     false,
+		CacheCreation5mPrice:       3.75e-6, // $3.75 per MTok (1.25x base)
+		CacheCreation1hPrice:       6e-6,    // $6.00 per MTok (2x base)
+		SupportsCacheBreakdown:     true,
 	}
 
 	// Claude 3.5 Sonnet
