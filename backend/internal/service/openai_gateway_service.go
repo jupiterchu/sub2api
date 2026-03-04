@@ -2681,7 +2681,6 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		)
 	}
 
-	// 对于其他错误，检查错误透传规则
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
 		PlatformOpenAI,
@@ -3490,6 +3489,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			} else {
 				billingSucceeded = true
 			}
+			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		if shouldBill && cost.ActualCost > 0 {

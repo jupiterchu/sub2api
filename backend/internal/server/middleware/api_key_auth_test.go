@@ -25,6 +25,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	group := &service.Group{
 		ID:               42,
 		Name:             "sub",
+		Platform:         service.PlatformAnthropic,
 		Status:           service.StatusActive,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
@@ -449,6 +450,13 @@ func TestAPIKeyAuthTouchLastUsedFailureDoesNotBlock(t *testing.T) {
 func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	group := &service.Group{
+		ID:       66,
+		Name:     "g-standard",
+		Status:   service.StatusActive,
+		Platform: service.PlatformAnthropic,
+		Hydrated: true,
+	}
 	user := &service.User{
 		ID:          9,
 		Role:        service.RoleUser,
@@ -462,7 +470,9 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 		Key:    "touch-standard",
 		Status: service.StatusActive,
 		User:   user,
+		Group:  group,
 	}
+	apiKey.GroupID = &group.ID
 
 	touchCalls := 0
 	apiKeyRepo := &stubApiKeyRepo{
@@ -490,6 +500,47 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, 1, touchCalls)
+}
+
+func TestAPIKeyAuthRequiresGroupInStandardMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          19,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:     202,
+		UserID: user.ID,
+		Key:    "standard-no-group",
+		Status: service.StatusActive,
+		User:   user,
+	}
+
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := newAuthTestRouter(apiKeyService, nil, cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "API_KEY_GROUP_REQUIRED")
 }
 
 func newAuthTestRouter(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) *gin.Engine {

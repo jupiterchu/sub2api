@@ -4275,17 +4275,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 	}
 	if resp.StatusCode >= 400 {
-		// 对于 400 错误，检查是否需要触发 failover
-		if resp.StatusCode == 400 {
+		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
+		if resp.StatusCode == 400 && s.cfg != nil && s.cfg.Gateway.FailoverOn400 {
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			if readErr != nil {
+				// ReadAll failed, fall back to normal error handling without consuming the stream
 				return s.handleErrorResponse(ctx, resp, c, account)
 			}
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-			// 可选：对部分 400 触发 failover（需开启配置）
-			if s.cfg != nil && s.cfg.Gateway.FailoverOn400 && s.shouldFailoverOn400(respBody) {
+			if s.shouldFailoverOn400(respBody) {
 				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 				upstreamDetail := ""
@@ -5658,7 +5658,6 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		)
 	}
 
-	// 检查错误透传规则
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
 		account.Platform,
@@ -6582,6 +6581,8 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			} else {
 				billingSucceeded = true
 			}
+			// 异步更新订阅缓存
+			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）
@@ -6591,6 +6592,8 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			} else {
 				billingSucceeded = true
 			}
+			// 异步更新余额缓存
+			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
 		}
 	}
 
@@ -6786,6 +6789,8 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 			} else {
 				billingSucceeded = true
 			}
+			// 异步更新订阅缓存
+			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）

@@ -69,6 +69,12 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			return
 		}
 
+		// 标准模式要求 API key 必须绑定一个可用分组，避免无分组 key 访问全局账号池
+		if apiKey.GroupID == nil || !service.IsGroupContextValid(apiKey.Group) {
+			abortWithGoogleError(c, 403, "API key 未绑定分组")
+			return
+		}
+
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 		if isSubscriptionType && subscriptionService != nil {
 			subscription, err := subscriptionService.GetActiveSubscription(

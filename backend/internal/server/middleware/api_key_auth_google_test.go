@@ -422,6 +422,13 @@ func TestApiKeyAuthWithSubscriptionGoogle_DisabledKey(t *testing.T) {
 func TestApiKeyAuthWithSubscriptionGoogle_InsufficientBalance(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	group := &service.Group{
+		ID:       88,
+		Name:     "google-balance",
+		Status:   service.StatusActive,
+		Platform: service.PlatformGemini,
+		Hydrated: true,
+	}
 	r := gin.New()
 	apiKeyService := newTestAPIKeyService(fakeAPIKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
@@ -434,6 +441,8 @@ func TestApiKeyAuthWithSubscriptionGoogle_InsufficientBalance(t *testing.T) {
 					Status:  service.StatusActive,
 					Balance: 0,
 				},
+				GroupID: &group.ID,
+				Group:   group,
 			}, nil
 		},
 	})
@@ -450,6 +459,41 @@ func TestApiKeyAuthWithSubscriptionGoogle_InsufficientBalance(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, http.StatusForbidden, resp.Error.Code)
 	require.Equal(t, "Insufficient account balance", resp.Error.Message)
+	require.Equal(t, "PERMISSION_DENIED", resp.Error.Status)
+}
+
+func TestApiKeyAuthWithSubscriptionGoogle_RequiresGroupInStandardMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	apiKeyService := newTestAPIKeyService(fakeAPIKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			return &service.APIKey{
+				ID:     1,
+				Key:    key,
+				Status: service.StatusActive,
+				User: &service.User{
+					ID:      123,
+					Status:  service.StatusActive,
+					Balance: 10,
+				},
+			}, nil
+		},
+	})
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	r.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, nil, cfg))
+	r.GET("/v1beta/test", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("Authorization", "Bearer no-group")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	var resp googleErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, http.StatusForbidden, resp.Error.Code)
+	require.Equal(t, "API key 未绑定分组", resp.Error.Message)
 	require.Equal(t, "PERMISSION_DENIED", resp.Error.Status)
 }
 
@@ -551,6 +595,13 @@ func TestApiKeyAuthWithSubscriptionGoogle_TouchFailureDoesNotBlock(t *testing.T)
 func TestApiKeyAuthWithSubscriptionGoogle_TouchesLastUsedInStandardMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	group := &service.Group{
+		ID:       89,
+		Name:     "google-standard",
+		Status:   service.StatusActive,
+		Platform: service.PlatformGemini,
+		Hydrated: true,
+	}
 	user := &service.User{
 		ID:          13,
 		Role:        service.RoleUser,
@@ -564,7 +615,9 @@ func TestApiKeyAuthWithSubscriptionGoogle_TouchesLastUsedInStandardMode(t *testi
 		Key:    "google-touch-standard",
 		Status: service.StatusActive,
 		User:   user,
+		Group:  group,
 	}
+	apiKey.GroupID = &group.ID
 
 	touchCalls := 0
 	r := gin.New()
