@@ -142,6 +142,49 @@ func TestGetModelPricing_UnknownModelFallsBackToSonnet(t *testing.T) {
 	require.InDelta(t, 3e-6, pricing.InputPricePerToken, 1e-12)
 }
 
+func TestGetModelPricing_DynamicClaudeMissing1hPrice_UsesFallbackBreakdown(t *testing.T) {
+	pricingService := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"claude-sonnet-4-5": {
+				InputCostPerToken:                   3e-6,
+				OutputCostPerToken:                  15e-6,
+				CacheCreationInputTokenCost:         3.75e-6,
+				CacheCreationInputTokenCostAbove1hr: 0, // 缺失 1h 价格
+				CacheReadInputTokenCost:             0.3e-6,
+				LiteLLMProvider:                     "anthropic",
+			},
+		},
+	}
+	svc := NewBillingService(&config.Config{}, pricingService)
+
+	pricing, err := svc.GetModelPricing("claude-sonnet-4-5")
+	require.NoError(t, err)
+	require.True(t, pricing.SupportsCacheBreakdown)
+	require.InDelta(t, 3.75e-6, pricing.CacheCreation5mPrice, 1e-12)
+	require.InDelta(t, 6e-6, pricing.CacheCreation1hPrice, 1e-12)
+}
+
+func TestGetModelPricing_DynamicNonClaudeMissing1hPrice_NoFallbackBreakdown(t *testing.T) {
+	pricingService := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gemini-3.1-pro": {
+				InputCostPerToken:                   2e-6,
+				OutputCostPerToken:                  12e-6,
+				CacheCreationInputTokenCost:         2e-6,
+				CacheCreationInputTokenCostAbove1hr: 0,
+				CacheReadInputTokenCost:             0.2e-6,
+				LiteLLMProvider:                     "google",
+			},
+		},
+	}
+	svc := NewBillingService(&config.Config{}, pricingService)
+
+	pricing, err := svc.GetModelPricing("gemini-3.1-pro")
+	require.NoError(t, err)
+	require.False(t, pricing.SupportsCacheBreakdown)
+	require.InDelta(t, 0.0, pricing.CacheCreation1hPrice, 1e-12)
+}
+
 func TestCalculateCostWithLongContext_BelowThreshold(t *testing.T) {
 	svc := newTestBillingService()
 

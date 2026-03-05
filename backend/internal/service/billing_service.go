@@ -194,16 +194,39 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	if s.pricingService != nil {
 		litellmPricing := s.pricingService.GetModelPricing(model)
 		if litellmPricing != nil {
-			// 启用 5m/1h 分类计费的条件：
-			// 1. 存在 1h 价格
-			// 2. 1h 价格 > 5m 价格（防止 LiteLLM 数据错误导致少收费）
 			price5m := litellmPricing.CacheCreationInputTokenCost
 			price1h := litellmPricing.CacheCreationInputTokenCostAbove1hr
 			enableBreakdown := price1h > 0 && price1h > price5m
+
+			// 部分 API 价格源可能缺失/错误返回 1h 单价（例如为 0 或 <=5m）。
+			// 对 Anthropic/Claude，回退到内置模型族比例，避免出现 UI 显示 1h 但按 5m 计费。
+			if !enableBreakdown && shouldApplyAnthropicCacheBreakdownFallback(model, litellmPricing) {
+				if fallback := s.getFallbackPricing(model); fallback != nil && fallback.SupportsCacheBreakdown &&
+					fallback.CacheCreation5mPrice > 0 && fallback.CacheCreation1hPrice > fallback.CacheCreation5mPrice {
+					if price5m <= 0 {
+						price5m = fallback.CacheCreation5mPrice
+					}
+					if price1h <= price5m {
+						ratio := fallback.CacheCreation1hPrice / fallback.CacheCreation5mPrice
+						if price5m > 0 && ratio > 1 {
+							price1h = price5m * ratio
+						} else {
+							price1h = fallback.CacheCreation1hPrice
+						}
+					}
+					enableBreakdown = price1h > 0 && price1h > price5m
+				}
+			}
+
+			cacheCreationPrice := litellmPricing.CacheCreationInputTokenCost
+			if cacheCreationPrice <= 0 && price5m > 0 {
+				cacheCreationPrice = price5m
+			}
+
 			return &ModelPricing{
 				InputPricePerToken:         litellmPricing.InputCostPerToken,
 				OutputPricePerToken:        litellmPricing.OutputCostPerToken,
-				CacheCreationPricePerToken: litellmPricing.CacheCreationInputTokenCost,
+				CacheCreationPricePerToken: cacheCreationPrice,
 				CacheReadPricePerToken:     litellmPricing.CacheReadInputTokenCost,
 				CacheCreation5mPrice:       price5m,
 				CacheCreation1hPrice:       price1h,
@@ -220,6 +243,17 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	}
 
 	return nil, fmt.Errorf("pricing not found for model: %s", model)
+}
+
+func shouldApplyAnthropicCacheBreakdownFallback(model string, pricing *LiteLLMModelPricing) bool {
+	if strings.Contains(model, "claude") {
+		return true
+	}
+	if pricing == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(pricing.LiteLLMProvider))
+	return strings.Contains(provider, "anthropic")
 }
 
 // CalculateCost 计算使用费用
