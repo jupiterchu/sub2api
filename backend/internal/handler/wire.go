@@ -31,6 +31,7 @@ func ProvideAdminHandlers(
 	userAttributeHandler *admin.UserAttributeHandler,
 	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
+	scheduledTestHandler *admin.ScheduledTestHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
@@ -54,6 +55,7 @@ func ProvideAdminHandlers(
 		UserAttribute:    userAttributeHandler,
 		ErrorPassthrough: errorPassthroughHandler,
 		APIKey:           apiKeyHandler,
+		ScheduledTest:    scheduledTestHandler,
 	}
 }
 
@@ -80,7 +82,9 @@ func ProvideGatewayHandler(
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	errorPassthroughService *service.ErrorPassthroughService,
+	userMsgQueueService *service.UserMessageQueueService,
 	cfg *config.Config,
+	settingService *service.SettingService,
 ) *GatewayHandler {
 	if usageHook != nil {
 		gatewayService.SetUsageRecordedHook(usageHook)
@@ -96,7 +100,9 @@ func ProvideGatewayHandler(
 		apiKeyService,
 		usageRecordWorkerPool,
 		errorPassthroughService,
+		userMsgQueueService,
 		cfg,
+		settingService,
 	)
 }
 
@@ -200,6 +206,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,
 	admin.NewAdminAPIKeyHandler,
+	admin.NewScheduledTestHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

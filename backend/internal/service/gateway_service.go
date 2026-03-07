@@ -501,29 +501,30 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
-	accountRepo          AccountRepository
-	groupRepo            GroupRepository
-	usageLogRepo         UsageLogRepository
-	userRepo             UserRepository
-	userSubRepo          UserSubscriptionRepository
-	userGroupRateRepo    UserGroupRateRepository
-	cache                GatewayCache
-	digestStore          *DigestSessionStore
-	cfg                  *config.Config
-	schedulerSnapshot    *SchedulerSnapshotService
-	billingService       *BillingService
-	rateLimitService     *RateLimitService
-	billingCacheService  *BillingCacheService
-	identityService      *IdentityService
-	httpUpstream         HTTPUpstream
-	deferredService      *DeferredService
-	concurrencyService   *ConcurrencyService
-	claudeTokenProvider  *ClaudeTokenProvider
-	sessionLimitCache    SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
-	rpmCache             RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
-	userGroupRateCache   *gocache.Cache
-	userGroupRateSF      singleflight.Group
-	modelsListCache      *gocache.Cache
+	accountRepo           AccountRepository
+	groupRepo             GroupRepository
+	usageLogRepo          UsageLogRepository
+	userRepo              UserRepository
+	userSubRepo           UserSubscriptionRepository
+	userGroupRateRepo     UserGroupRateRepository
+	cache                 GatewayCache
+	digestStore           *DigestSessionStore
+	cfg                   *config.Config
+	schedulerSnapshot     *SchedulerSnapshotService
+	billingService        *BillingService
+	rateLimitService      *RateLimitService
+	billingCacheService   *BillingCacheService
+	identityService       *IdentityService
+	httpUpstream          HTTPUpstream
+	deferredService       *DeferredService
+	concurrencyService    *ConcurrencyService
+	claudeTokenProvider   *ClaudeTokenProvider
+	sessionLimitCache     SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	rpmCache              RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
+	userGroupRateResolver *userGroupRateResolver
+	userGroupRateCache    *gocache.Cache
+	userGroupRateSF       singleflight.Group
+	modelsListCache       *gocache.Cache
 	modelsListCacheTTL   time.Duration
 	responseHeaderFilter *responseheaders.CompiledHeaderFilter
 	debugModelRouting    atomic.Bool
@@ -596,6 +597,13 @@ func NewGatewayService(
 		modelsListCacheTTL:   modelsListTTL,
 		responseHeaderFilter: compileResponseHeaderFilter(cfg),
 	}
+	svc.userGroupRateResolver = newUserGroupRateResolver(
+		userGroupRateRepo,
+		svc.userGroupRateCache,
+		userGroupRateTTL,
+		&svc.userGroupRateSF,
+		"service.gateway",
+	)
 	svc.debugModelRouting.Store(parseDebugEnvBool(os.Getenv("SUB2API_DEBUG_MODEL_ROUTING")))
 	svc.debugClaudeMimic.Store(parseDebugEnvBool(os.Getenv("SUB2API_DEBUG_CLAUDE_MIMIC")))
 	return svc
@@ -1242,6 +1250,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				modelScopeSkippedIDs = append(modelScopeSkippedIDs, account.ID)
 				continue
 			}
+			// 配额检查
+			if !s.isAccountSchedulableForQuota(account) {
+				continue
+			}
 			// 窗口费用检查（非粘性会话路径）
 			if !s.isAccountSchedulableForWindowCost(ctx, account, false) {
 				filteredWindowCost++
@@ -1274,6 +1286,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							s.isAccountAllowedForPlatform(stickyAccount, platform, useMixed) &&
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
+							s.isAccountSchedulableForQuota(stickyAccount) &&
 							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true) &&
 
 							s.isAccountSchedulableForRPM(ctx, stickyAccount, true) { // 粘性会话窗口费用+RPM 检查
@@ -1325,7 +1338,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			for _, acc := range routingCandidates {
 				routingLoads = append(routingLoads, AccountWithConcurrency{
 					ID:             acc.ID,
-					MaxConcurrency: acc.Concurrency,
+					MaxConcurrency: acc.EffectiveLoadFactor(),
 				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
@@ -1430,6 +1443,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					s.isAccountAllowedForPlatform(account, platform, useMixed) &&
 					(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) &&
 					s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) &&
+					s.isAccountSchedulableForQuota(account) &&
 					s.isAccountSchedulableForWindowCost(ctx, account, true) &&
 
 					s.isAccountSchedulableForRPM(ctx, account, true) { // 粘性会话窗口费用+RPM 检查
@@ -1494,6 +1508,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
 			continue
 		}
+		// 配额检查
+		if !s.isAccountSchedulableForQuota(acc) {
+			continue
+		}
 		// 窗口费用检查（非粘性会话路径）
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
 			continue
@@ -1513,7 +1531,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
 			ID:             acc.ID,
-			MaxConcurrency: acc.Concurrency,
+			MaxConcurrency: acc.EffectiveLoadFactor(),
 		})
 	}
 
@@ -1796,8 +1814,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		var err error
 		if groupID != nil {
 			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, platforms)
-		} else {
+		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
+		} else {
+			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
 		}
 		if err != nil {
 			slog.Debug("account_scheduling_list_failed",
@@ -1838,7 +1858,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
 		// 分组内无账号则返回空列表，由上层处理错误，不再回退到全平台查询
 	} else {
-		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, platform)
 	}
 	if err != nil {
 		slog.Debug("account_scheduling_list_failed",
@@ -1978,13 +1998,14 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 }
 
 // isAccountInGroup checks if the account belongs to the specified group.
-// Returns true if groupID is nil (no group restriction) or account belongs to the group.
+// When groupID is nil, returns true only for ungrouped accounts (no group assignments).
 func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool {
-	if groupID == nil {
-		return true // 无分组限制
-	}
 	if account == nil {
 		return false
+	}
+	if groupID == nil {
+		// 无分组的 API Key 只能使用未分组的账号
+		return len(account.AccountGroups) == 0
 	}
 	for _, ag := range account.AccountGroups {
 		if ag.GroupID == *groupID {
@@ -2122,6 +2143,15 @@ func (s *GatewayService) withWindowCostPrefetch(ctx context.Context, accounts []
 	}
 
 	return context.WithValue(ctx, windowCostPrefetchContextKey, costs)
+}
+
+// isAccountSchedulableForQuota 检查 API Key 账号是否在配额限制内
+// 仅适用于配置了 quota_limit 的 apikey 类型账号
+func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
+	if account.Type != AccountTypeAPIKey {
+		return true
+	}
+	return !account.IsQuotaExceeded()
 }
 
 // isAccountSchedulableForWindowCost 检查账号是否可根据窗口费用进行调度
@@ -2601,7 +2631,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if s.debugModelRoutingEnabled() {
 								logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 							}
@@ -2653,6 +2683,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 				continue
 			}
 			if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+				continue
+			}
+			if !s.isAccountSchedulableForQuota(acc) {
 				continue
 			}
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
@@ -2711,7 +2744,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						return account, nil
 					}
 				}
@@ -2752,6 +2785,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			continue
+		}
+		if !s.isAccountSchedulableForQuota(acc) {
 			continue
 		}
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
@@ -2829,7 +2865,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
@@ -2883,6 +2919,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 				continue
 			}
 			if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+				continue
+			}
+			if !s.isAccountSchedulableForQuota(acc) {
 				continue
 			}
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
@@ -2941,7 +2980,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 							return account, nil
 						}
@@ -2984,6 +3023,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			continue
+		}
+		if !s.isAccountSchedulableForQuota(acc) {
 			continue
 		}
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
@@ -3299,6 +3341,10 @@ func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedMo
 	}
 	if account.Platform == PlatformSora {
 		return s.isSoraModelSupportedByAccount(account, requestedModel)
+	}
+	// OpenAI 透传模式：仅替换认证，允许所有模型
+	if account.Platform == PlatformOpenAI && account.IsOpenAIPassthroughEnabled() {
+		return true
 	}
 	// OAuth/SetupToken 账号使用 Anthropic 标准映射（短ID → 长ID）
 	if account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
@@ -3905,7 +3951,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
-		return s.forwardAnthropicAPIKeyPassthrough(ctx, c, account, parsed.Body, parsed.Model, parsed.Stream, startTime)
+		passthroughBody := parsed.Body
+		passthroughModel := parsed.Model
+		if passthroughModel != "" {
+			if mappedModel := account.GetMappedModel(passthroughModel); mappedModel != passthroughModel {
+				passthroughBody = s.replaceModelInBody(passthroughBody, mappedModel)
+				logger.LegacyPrintf("service.gateway", "Passthrough model mapping: %s -> %s (account: %s)", parsed.Model, mappedModel, account.Name)
+				passthroughModel = mappedModel
+			}
+		}
+		return s.forwardAnthropicAPIKeyPassthrough(ctx, c, account, passthroughBody, passthroughModel, parsed.Stream, startTime)
 	}
 
 	body := parsed.Body
@@ -4324,6 +4379,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 处理正常响应
+
+	// 触发上游接受回调（提前释放串行锁，不等流完成）
+	if parsed.OnUpstreamAccepted != nil {
+		parsed.OnUpstreamAccepted()
+	}
+
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
@@ -4584,7 +4645,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, err
 		}
-		targetURL = validatedURL + "/v1/messages"
+		targetURL = validatedURL + "/v1/messages?beta=true"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
@@ -4964,7 +5025,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, err
 			}
-			targetURL = validatedURL + "/v1/messages"
+			targetURL = validatedURL + "/v1/messages?beta=true"
 		}
 	}
 
@@ -5385,6 +5446,11 @@ func extractUpstreamErrorMessage(body []byte) string {
 			}
 		}
 		return m
+	}
+
+	// ChatGPT 内部 API 风格：{"detail":"..."}
+	if d := gjson.GetBytes(body, "detail").String(); strings.TrimSpace(d) != "" {
+		return d
 	}
 
 	// 兜底：尝试顶层 message
@@ -6331,63 +6397,20 @@ func (s *GatewayService) replaceModelInResponseBody(body []byte, fromModel, toMo
 }
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
-	if s == nil || userID <= 0 || groupID <= 0 {
+	if s == nil {
 		return groupDefaultMultiplier
 	}
-
-	key := fmt.Sprintf("%d:%d", userID, groupID)
-	if s.userGroupRateCache != nil {
-		if cached, ok := s.userGroupRateCache.Get(key); ok {
-			if multiplier, castOK := cached.(float64); castOK {
-				userGroupRateCacheHitTotal.Add(1)
-				return multiplier
-			}
-		}
+	resolver := s.userGroupRateResolver
+	if resolver == nil {
+		resolver = newUserGroupRateResolver(
+			s.userGroupRateRepo,
+			s.userGroupRateCache,
+			resolveUserGroupRateCacheTTL(s.cfg),
+			&s.userGroupRateSF,
+			"service.gateway",
+		)
 	}
-	if s.userGroupRateRepo == nil {
-		return groupDefaultMultiplier
-	}
-	userGroupRateCacheMissTotal.Add(1)
-
-	value, err, shared := s.userGroupRateSF.Do(key, func() (any, error) {
-		if s.userGroupRateCache != nil {
-			if cached, ok := s.userGroupRateCache.Get(key); ok {
-				if multiplier, castOK := cached.(float64); castOK {
-					userGroupRateCacheHitTotal.Add(1)
-					return multiplier, nil
-				}
-			}
-		}
-
-		userGroupRateCacheLoadTotal.Add(1)
-		userRate, repoErr := s.userGroupRateRepo.GetByUserAndGroup(ctx, userID, groupID)
-		if repoErr != nil {
-			return nil, repoErr
-		}
-		multiplier := groupDefaultMultiplier
-		if userRate != nil {
-			multiplier = *userRate
-		}
-		if s.userGroupRateCache != nil {
-			s.userGroupRateCache.Set(key, multiplier, resolveUserGroupRateCacheTTL(s.cfg))
-		}
-		return multiplier, nil
-	})
-	if shared {
-		userGroupRateCacheSFSharedTotal.Add(1)
-	}
-	if err != nil {
-		userGroupRateCacheFallbackTotal.Add(1)
-		logger.LegacyPrintf("service.gateway", "get user group rate failed, fallback to group default: user=%d group=%d err=%v", userID, groupID, err)
-		return groupDefaultMultiplier
-	}
-
-	multiplier, ok := value.(float64)
-	if !ok {
-		userGroupRateCacheFallbackTotal.Add(1)
-		return groupDefaultMultiplier
-	}
-	return multiplier
+	return resolver.Resolve(ctx, userID, groupID, groupDefaultMultiplier)
 }
 
 // RecordUsageInput 记录使用量的输入参数
@@ -6403,9 +6426,93 @@ type RecordUsageInput struct {
 	APIKeyService     APIKeyQuotaUpdater // 可选：用于更新API Key配额
 }
 
-// APIKeyQuotaUpdater defines the interface for updating API Key quota
+// APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
 type APIKeyQuotaUpdater interface {
 	UpdateQuotaUsed(ctx context.Context, apiKeyID int64, cost float64) error
+	UpdateRateLimitUsage(ctx context.Context, apiKeyID int64, cost float64) error
+}
+
+// postUsageBillingParams 统一扣费所需的参数
+type postUsageBillingParams struct {
+	Cost                  *CostBreakdown
+	User                  *User
+	APIKey                *APIKey
+	Account               *Account
+	Subscription          *UserSubscription
+	IsSubscriptionBill    bool
+	AccountRateMultiplier float64
+	APIKeyService         APIKeyQuotaUpdater
+}
+
+// postUsageBilling 统一处理使用量记录后的扣费逻辑：
+//   - 订阅/余额扣费
+//   - API Key 配额更新
+//   - API Key 限速用量更新
+//   - 账号配额用量更新（账号口径：TotalCost × 账号计费倍率）
+func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps) {
+	cost := p.Cost
+
+	// 1. 订阅 / 余额扣费
+	if p.IsSubscriptionBill {
+		if cost.TotalCost > 0 {
+			if err := deps.userSubRepo.IncrementUsage(ctx, p.Subscription.ID, cost.TotalCost); err != nil {
+				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+			}
+			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, cost.TotalCost)
+		}
+	} else {
+		if cost.ActualCost > 0 {
+			if err := deps.userRepo.DeductBalance(ctx, p.User.ID, cost.ActualCost); err != nil {
+				slog.Error("deduct balance failed", "user_id", p.User.ID, "error", err)
+			}
+			deps.billingCacheService.QueueDeductBalance(p.User.ID, cost.ActualCost)
+		}
+	}
+
+	// 2. API Key 配额
+	if cost.ActualCost > 0 && p.APIKey.Quota > 0 && p.APIKeyService != nil {
+		if err := p.APIKeyService.UpdateQuotaUsed(ctx, p.APIKey.ID, cost.ActualCost); err != nil {
+			slog.Error("update api key quota failed", "api_key_id", p.APIKey.ID, "error", err)
+		}
+	}
+
+	// 3. API Key 限速用量
+	if cost.ActualCost > 0 && p.APIKey.HasRateLimits() && p.APIKeyService != nil {
+		if err := p.APIKeyService.UpdateRateLimitUsage(ctx, p.APIKey.ID, cost.ActualCost); err != nil {
+			slog.Error("update api key rate limit usage failed", "api_key_id", p.APIKey.ID, "error", err)
+		}
+		deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, cost.ActualCost)
+	}
+
+	// 4. 账号配额用量（账号口径：TotalCost × 账号计费倍率）
+	if cost.TotalCost > 0 && p.Account.Type == AccountTypeAPIKey && p.Account.GetQuotaLimit() > 0 {
+		accountCost := cost.TotalCost * p.AccountRateMultiplier
+		if err := deps.accountRepo.IncrementQuotaUsed(ctx, p.Account.ID, accountCost); err != nil {
+			slog.Error("increment account quota used failed", "account_id", p.Account.ID, "cost", accountCost, "error", err)
+		}
+	}
+
+	// 5. 更新账号最近使用时间
+	deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+}
+
+// billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）
+type billingDeps struct {
+	accountRepo         AccountRepository
+	userRepo            UserRepository
+	userSubRepo         UserSubscriptionRepository
+	billingCacheService *BillingCacheService
+	deferredService     *DeferredService
+}
+
+func (s *GatewayService) billingDeps() *billingDeps {
+	return &billingDeps{
+		accountRepo:         s.accountRepo,
+		userRepo:            s.userRepo,
+		userSubRepo:         s.userSubRepo,
+		billingCacheService: s.billingCacheService,
+		deferredService:     s.deferredService,
+	}
 }
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
@@ -6570,54 +6677,33 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	}
 
 	shouldBill := inserted || err != nil
-	billingSucceeded := false
 
-	// 根据计费类型执行扣费
-	if isSubscriptionBilling {
-		// 订阅模式：更新订阅用量（使用 TotalCost 原始费用，不考虑倍率）
-		if shouldBill && cost.TotalCost > 0 {
-			if err := s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost); err != nil {
-				logger.LegacyPrintf("service.gateway", "Increment subscription usage failed: %v", err)
-			} else {
-				billingSucceeded = true
-			}
-			// 异步更新订阅缓存
-			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
+	if shouldBill {
+		postUsageBilling(ctx, &postUsageBillingParams{
+			Cost:                  cost,
+			User:                  user,
+			APIKey:                apiKey,
+			Account:               account,
+			Subscription:          subscription,
+			IsSubscriptionBill:    isSubscriptionBilling,
+			AccountRateMultiplier: accountRateMultiplier,
+			APIKeyService:         input.APIKeyService,
+		}, s.billingDeps())
+
+		// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
+		if s.usageRecordedHook != nil {
+			go s.usageRecordedHook.OnUsageRecorded(
+				apiKey,
+				result.Model,
+				result.Usage.InputTokens,
+				result.Usage.OutputTokens,
+				result.Usage.CacheReadInputTokens,
+				result.Usage.CacheCreationInputTokens,
+				cost.ActualCost,
+			)
 		}
 	} else {
-		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）
-		if shouldBill && cost.ActualCost > 0 {
-			if err := s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost); err != nil {
-				logger.LegacyPrintf("service.gateway", "Deduct balance failed: %v", err)
-			} else {
-				billingSucceeded = true
-			}
-			// 异步更新余额缓存
-			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
-		}
-	}
-
-	// 更新 API Key 配额（如果设置了配额限制）
-	if shouldBill && cost.ActualCost > 0 && apiKey.Quota > 0 && input.APIKeyService != nil {
-		if err := input.APIKeyService.UpdateQuotaUsed(ctx, apiKey.ID, cost.ActualCost); err != nil {
-			logger.LegacyPrintf("service.gateway", "Update API key quota failed: %v", err)
-		}
-	}
-
-	// Schedule batch update for account last_used_at
-	s.deferredService.ScheduleLastUsedUpdate(account.ID)
-
-	// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
-	if billingSucceeded && s.usageRecordedHook != nil {
-		go s.usageRecordedHook.OnUsageRecorded(
-			apiKey,
-			result.Model,
-			result.Usage.InputTokens,
-			result.Usage.OutputTokens,
-			result.Usage.CacheReadInputTokens,
-			result.Usage.CacheCreationInputTokens,
-			cost.ActualCost,
-		)
+		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 	}
 
 	return nil
@@ -6778,53 +6864,33 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 
 	shouldBill := inserted || err != nil
-	billingSucceeded := false
 
-	// 根据计费类型执行扣费
-	if isSubscriptionBilling {
-		// 订阅模式：更新订阅用量（使用 TotalCost 原始费用，不考虑倍率）
-		if shouldBill && cost.TotalCost > 0 {
-			if err := s.userSubRepo.IncrementUsage(ctx, subscription.ID, cost.TotalCost); err != nil {
-				logger.LegacyPrintf("service.gateway", "Increment subscription usage failed: %v", err)
-			} else {
-				billingSucceeded = true
-			}
-			// 异步更新订阅缓存
-			s.billingCacheService.QueueUpdateSubscriptionUsage(user.ID, *apiKey.GroupID, cost.TotalCost)
+	if shouldBill {
+		postUsageBilling(ctx, &postUsageBillingParams{
+			Cost:                  cost,
+			User:                  user,
+			APIKey:                apiKey,
+			Account:               account,
+			Subscription:          subscription,
+			IsSubscriptionBill:    isSubscriptionBilling,
+			AccountRateMultiplier: accountRateMultiplier,
+			APIKeyService:         input.APIKeyService,
+		}, s.billingDeps())
+
+		// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
+		if s.usageRecordedHook != nil {
+			go s.usageRecordedHook.OnUsageRecorded(
+				apiKey,
+				result.Model,
+				result.Usage.InputTokens,
+				result.Usage.OutputTokens,
+				result.Usage.CacheReadInputTokens,
+				result.Usage.CacheCreationInputTokens,
+				cost.ActualCost,
+			)
 		}
 	} else {
-		// 余额模式：扣除用户余额（使用 ActualCost 考虑倍率后的费用）
-		if shouldBill && cost.ActualCost > 0 {
-			if err := s.userRepo.DeductBalance(ctx, user.ID, cost.ActualCost); err != nil {
-				logger.LegacyPrintf("service.gateway", "Deduct balance failed: %v", err)
-			} else {
-				billingSucceeded = true
-			}
-			// 异步更新余额缓存
-			s.billingCacheService.QueueDeductBalance(user.ID, cost.ActualCost)
-			// API Key 独立配额扣费
-			if input.APIKeyService != nil && apiKey.Quota > 0 {
-				if err := input.APIKeyService.UpdateQuotaUsed(ctx, apiKey.ID, cost.ActualCost); err != nil {
-					logger.LegacyPrintf("service.gateway", "Add API key quota used failed: %v", err)
-				}
-			}
-		}
-	}
-
-	// Schedule batch update for account last_used_at
-	s.deferredService.ScheduleLastUsedUpdate(account.ID)
-
-	// [NextJS] 调用用量记录钩子（仅在扣费成功后触发）
-	if billingSucceeded && s.usageRecordedHook != nil {
-		go s.usageRecordedHook.OnUsageRecorded(
-			apiKey,
-			result.Model,
-			result.Usage.InputTokens,
-			result.Usage.OutputTokens,
-			result.Usage.CacheReadInputTokens,
-			result.Usage.CacheCreationInputTokens,
-			cost.ActualCost,
-		)
+		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 	}
 
 	return nil
@@ -6839,7 +6905,14 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
-		return s.forwardCountTokensAnthropicAPIKeyPassthrough(ctx, c, account, parsed.Body)
+		passthroughBody := parsed.Body
+		if reqModel := parsed.Model; reqModel != "" {
+			if mappedModel := account.GetMappedModel(reqModel); mappedModel != reqModel {
+				passthroughBody = s.replaceModelInBody(passthroughBody, mappedModel)
+				logger.LegacyPrintf("service.gateway", "CountTokens passthrough model mapping: %s -> %s (account: %s)", reqModel, mappedModel, account.Name)
+			}
+		}
+		return s.forwardCountTokensAnthropicAPIKeyPassthrough(ctx, c, account, passthroughBody)
 	}
 
 	body := parsed.Body
@@ -7130,7 +7203,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, err
 		}
-		targetURL = validatedURL + "/v1/messages/count_tokens"
+		targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
@@ -7177,7 +7250,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			if err != nil {
 				return nil, err
 			}
-			targetURL = validatedURL + "/v1/messages/count_tokens"
+			targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
 		}
 	}
 
